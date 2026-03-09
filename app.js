@@ -166,6 +166,7 @@ function AgrovetApp() {
   const [expenses,    setExpenses]    = useState([]);
   const [users,       setUsers]       = useState([]);
   const [debts,       setDebts]       = useState([]);
+  const [settings,    setSettings]    = useState({ debt_alert_days: '3' });
   const [categories,  setCategories]  = useState([]);
   const [businessInfo] = useState({ name: 'Macys Agrofeeds', location: 'Machakos, Kenya' });
   const [notification, setNotification] = useState(null);
@@ -202,8 +203,9 @@ function AgrovetApp() {
       setExpenses(exp.expenses || []);
       setUsers(usr.users || []);
       setCategories((cats.categories || []).map(c => c.name));
-      const dbt = await api('/api/debts');
+      const [dbt, sett] = await Promise.all([api('/api/debts'), api('/api/settings')]);
       setDebts(dbt.debts || []);
+      setSettings(prev => ({ ...prev, ...sett }));
     } catch (e) {
       showNotif('Failed to load data: ' + e.message, 'error');
     } finally {
@@ -256,17 +258,20 @@ function AgrovetApp() {
     setDebts(prev => [...prev, result.debt]);
     showNotif('Debt recorded.');
   };
-
   const clearDebt = async (id) => {
     const result = await api(`/api/debts/${id}/clear`, { method:'POST' });
-    setDebts(prev => prev.map(d => d.id === id ? result.debt : d));
+    setDebts(prev => prev.map(d => d.id===id ? result.debt : d));
     showNotif('Debt marked as cleared.');
   };
-
   const deleteDebt = async (id) => {
     await api(`/api/debts/${id}`, { method:'DELETE' });
-    setDebts(prev => prev.filter(d => d.id !== id));
+    setDebts(prev => prev.filter(d => d.id!==id));
     showNotif('Debt deleted.');
+  };
+  const saveSettings = async (newSettings) => {
+    await api('/api/settings', { method:'POST', body: newSettings });
+    setSettings(prev => ({ ...prev, ...newSettings }));
+    showNotif('Settings saved.');
   };
 
   const deleteSalesByDate = async (date) => {
@@ -339,6 +344,7 @@ function AgrovetApp() {
         lowStockItems={lowStockItems} outOfStock={outOfStock} totalRevenue={totalRevenue}
         totalProfit={totalProfit} netProfit={netProfit} businessInfo={businessInfo} setActiveTab={setActiveTab}
         debts={debts} onAddDebt={addDebt} onClearDebt={clearDebt} onDeleteDebt={deleteDebt}
+        settings={settings} onSaveSettings={saveSettings}
         currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
       case 'inventory': return <InventoryPage inventory={inventory} categories={categories} isAdmin={isAdmin}
         onUpdate={updateInventoryItem} onAdd={addInventoryItem} onDelete={deleteInventoryItem}
@@ -504,45 +510,61 @@ function AgrovetApp() {
 // ============================================================
 // DEBTS CARD
 // ============================================================
-function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, setModal, showNotif, isMobile }) {
-  const [showForm,   setShowForm]   = useState(false);
-  const [saving,     setSaving]     = useState(false);
-  const [itemSearch, setItemSearch] = useState('');
-  const [selItem,    setSelItem]    = useState(null);  // selected inventory item
+function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, setModal,
+                     showNotif, isMobile, alertDays, onSaveSettings }) {
+  const [showForm,     setShowForm]     = useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [itemSearch,   setItemSearch]   = useState('');
+  const [selItem,      setSelItem]      = useState(null);
+  const [editingDays,  setEditingDays]  = useState(false);
+  const [draftDays,    setDraftDays]    = useState(String(alertDays));
   const [form, setForm] = useState({
     person_name:'', quantity:'', date_added:today(), notes:''
   });
 
+  const overdueDays  = alertDays;
+  const warnDays     = Math.max(1, alertDays - 1);
   const totalOwed    = debts.filter(d=>!d.cleared).reduce((a,d)=>a+d.total_cost, 0);
-  const overdueCount = debts.filter(d=>!d.cleared && d.days_outstanding>5).length;
+  const overdueCount = debts.filter(d=>!d.cleared && d.days_outstanding>=overdueDays).length;
   const unitPrice    = selItem ? selItem.selling_price : 0;
   const totalCost    = parseFloat(form.quantity||0) * unitPrice;
 
-  // Filter inventory — same logic as sales page
   const available = inventory.filter(i =>
     i.quantity > 0 &&
     itemSearch.length > 0 &&
     i.name.toLowerCase().includes(itemSearch.toLowerCase())
   ).slice(0, 8);
 
-  const selectItem = (item) => {
-    setSelItem(item);
-    setItemSearch(item.name);
+  const selectItem = (item) => { setSelItem(item); setItemSearch(item.name); };
+
+  const rowBg = (d) => {
+    if (d.cleared) return '#f9f9f9';
+    if (d.days_outstanding >= overdueDays) return '#ffebee';
+    if (d.days_outstanding >= warnDays)    return '#fff8e1';
+    return '#fff';
+  };
+  const rowText = (d) => {
+    if (d.cleared) return '#aaa';
+    if (d.days_outstanding >= overdueDays) return '#c62828';
+    if (d.days_outstanding >= warnDays)    return '#e65100';
+    return '#333';
+  };
+  const statusLabel = (d) => {
+    if (d.cleared) return { label:'Cleared', bg:'#e8f5e9', color:'#2e7d32' };
+    if (d.days_outstanding >= overdueDays) return { label:'Overdue', bg:'#ffebee', color:'#c62828' };
+    if (d.days_outstanding >= warnDays)    return { label:'Due Soon', bg:'#fff8e1', color:'#e65100' };
+    return { label:'Active', bg:'#e3f2fd', color:'#1565c0' };
   };
 
   const resetForm = () => {
     setForm({ person_name:'', quantity:'', date_added:today(), notes:'' });
-    setItemSearch('');
-    setSelItem(null);
+    setItemSearch(''); setSelItem(null);
   };
-
-  const rowBg   = (d) => d.cleared ? '#f9f9f9' : d.days_outstanding>5 ? '#ffebee' : d.days_outstanding>=4 ? '#fff8e1' : '#fff';
-  const rowText = (d) => d.cleared ? '#aaa'     : d.days_outstanding>5 ? '#c62828' : d.days_outstanding>=4 ? '#e65100' : '#333';
 
   const handleSave = async () => {
     if (!form.person_name.trim()) { showNotif('Enter person name', 'error'); return; }
     if (!selItem)                  { showNotif('Select an item from inventory', 'error'); return; }
-    if (!form.quantity||parseFloat(form.quantity)<=0) { showNotif('Enter a valid quantity', 'error'); return; }
+    if (!form.quantity || parseFloat(form.quantity)<=0) { showNotif('Enter a valid quantity', 'error'); return; }
     setSaving(true);
     try {
       await onAdd({
@@ -553,19 +575,25 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
         date_added:  form.date_added,
         notes:       form.notes,
       });
-      resetForm();
-      setShowForm(false);
+      resetForm(); setShowForm(false);
     } catch(e){ showNotif(e.message,'error'); }
     finally { setSaving(false); }
   };
 
+  const saveDays = async () => {
+    const val = parseInt(draftDays);
+    if (isNaN(val)||val<1) { showNotif('Enter a valid number of days', 'error'); return; }
+    await onSaveSettings({ debt_alert_days: String(val) });
+    setEditingDays(false);
+  };
+
   return (
-    <div style={{ marginTop:20, background:'#fff', borderRadius:12, padding: isMobile ? '14px 12px' : 20,
+    <div style={{ marginTop:20, background:'#fff', borderRadius:12, padding: isMobile?'14px 12px':20,
                   boxShadow:'0 1px 8px rgba(0,0,0,0.06)',
                   border: overdueCount>0 ? '1px solid #ffcdd2' : '1px solid #f0f0f0' }}>
 
       {/* Header */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}>
         <div>
           <h3 style={{ margin:0, fontSize: isMobile?14:15, fontWeight:700, color:'#1a3a2a',
                        display:'flex', alignItems:'center', gap:6 }}>
@@ -578,6 +606,34 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
             )}
           </h3>
           {totalOwed>0 && <div style={{ fontSize:11, color:'#c62828', fontWeight:600, marginTop:2 }}>Total owed: {fmt(totalOwed)}</div>}
+          {/* Alert period setting */}
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:4 }}>
+            <span style={{ fontSize:11, color:'#888' }}>Alert after:</span>
+            {editingDays ? (
+              <>
+                <input type="number" min="1" max="30" value={draftDays}
+                       onChange={e=>setDraftDays(e.target.value)}
+                       style={{ width:46, padding:'2px 6px', borderRadius:6, border:'1.5px solid #4caf50',
+                                fontSize:12, textAlign:'center' }}/>
+                <span style={{ fontSize:11, color:'#888' }}>days</span>
+                <button onClick={saveDays}
+                        style={{ padding:'2px 8px', background:'#1a3a2a', color:'#fff', border:'none',
+                                 borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:700 }}>Save</button>
+                <button onClick={()=>{ setEditingDays(false); setDraftDays(String(alertDays)); }}
+                        style={{ padding:'2px 8px', background:'none', color:'#888', border:'1px solid #ddd',
+                                 borderRadius:6, cursor:'pointer', fontSize:11 }}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize:12, fontWeight:700, color:'#1a3a2a' }}>{alertDays} days</span>
+                {currentUser?.role==='admin' && (
+                  <button onClick={()=>{ setEditingDays(true); setDraftDays(String(alertDays)); }}
+                          style={{ padding:'1px 7px', background:'#f5f5f5', color:'#555', border:'1px solid #ddd',
+                                   borderRadius:6, cursor:'pointer', fontSize:11 }}>✏ Edit</button>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <button onClick={()=>{ setShowForm(!showForm); if(showForm) resetForm(); }}
                 style={{ padding: isMobile?'6px 12px':'8px 16px', background:'#1a3a2a', color:'#fff',
@@ -591,10 +647,7 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
       {showForm && (
         <div style={{ background:'#f9f9f9', borderRadius:10, padding: isMobile?12:16,
                       marginBottom:14, border:'1px solid #e0e0e0' }}>
-
-          {/* Row 1: Person + Item search */}
           <div style={{ display:'grid', gridTemplateColumns: isMobile?'1fr':'1fr 1fr', gap:10, marginBottom:10 }}>
-            {/* Person Name */}
             <div>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Person Name *</label>
               <input type="text" value={form.person_name} placeholder="e.g. John Kamau"
@@ -602,8 +655,6 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                      style={{ width:'100%', padding:'9px 12px', borderRadius:8,
                               border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
             </div>
-
-            {/* Item search — same style as sales page */}
             <div style={{ position:'relative' }}>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>
                 Item * {selItem && <span style={{ color:'#4caf50', fontSize:10, fontWeight:700 }}>✓ {fmt(selItem.selling_price)} each</span>}
@@ -612,10 +663,8 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                      onChange={e=>{ setItemSearch(e.target.value); setSelItem(null); }}
                      placeholder="Search product…"
                      style={{ width:'100%', padding:'9px 12px', borderRadius:8,
-                              border: selItem ? '1.5px solid #4caf50' : '1.5px solid #ddd',
-                              fontSize:13, boxSizing:'border-box',
-                              background: selItem ? '#f1f8e9' : '#fff' }}/>
-              {/* Dropdown — identical look to sales page */}
+                              border: selItem?'1.5px solid #4caf50':'1.5px solid #ddd',
+                              fontSize:13, boxSizing:'border-box', background: selItem?'#f1f8e9':'#fff' }}/>
               {itemSearch && !selItem && (
                 <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff',
                               borderRadius:8, boxShadow:'0 4px 20px rgba(0,0,0,0.12)', zIndex:300,
@@ -639,37 +688,28 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
               )}
             </div>
           </div>
-
-          {/* Row 2: Qty, Unit Price (read-only), Total (read-only), Date */}
           <div style={{ display:'grid', gridTemplateColumns: isMobile?'1fr 1fr':'1fr 1fr 1fr 1fr', gap:10, marginBottom:10 }}>
-            {/* Quantity — only input the user fills */}
             <div>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Quantity *</label>
-              <input type="number" step="0.25" min="0.25" value={form.quantity}
+              <input type="number" step="0.25" min="0.25" value={form.quantity} placeholder="0"
                      onChange={e=>setForm(p=>({...p,quantity:e.target.value}))}
-                     placeholder="0"
                      style={{ width:'100%', padding:'9px 12px', borderRadius:8,
                               border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
             </div>
-            {/* Unit Price — read only, from inventory */}
             <div>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Unit Price</label>
               <div style={{ padding:'9px 12px', borderRadius:8, border:'1.5px solid #e8f5e9',
-                            fontSize:13, background:'#f1f8e9', fontWeight:700,
-                            color: selItem ? '#2e7d32' : '#bbb' }}>
+                            fontSize:13, background:'#f1f8e9', fontWeight:700, color: selItem?'#2e7d32':'#bbb' }}>
                 {selItem ? fmt(unitPrice) : '—'}
               </div>
             </div>
-            {/* Total — auto-calculated */}
             <div>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Total Cost</label>
               <div style={{ padding:'9px 12px', borderRadius:8, border:'1.5px solid #e0e0e0',
-                            fontSize:13, background:'#f5f5f5', fontWeight:800,
-                            color: totalCost>0 ? '#1a3a2a' : '#bbb' }}>
+                            fontSize:13, background:'#f5f5f5', fontWeight:800, color: totalCost>0?'#1a3a2a':'#bbb' }}>
                 {totalCost>0 ? fmt(totalCost) : '—'}
               </div>
             </div>
-            {/* Date */}
             <div>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Date</label>
               <input type="date" value={form.date_added}
@@ -678,18 +718,15 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                               border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
             </div>
           </div>
-
-          {/* Notes */}
           <div style={{ marginBottom:12 }}>
             <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Notes (optional)</label>
             <input type="text" value={form.notes} placeholder="e.g. will pay Friday"
                    onChange={e=>setForm(p=>({...p,notes:e.target.value}))}
-                   style={{ width:'100%', padding:'7px 10px', borderRadius:7,
+                   style={{ width:'100%', padding:'9px 12px', borderRadius:8,
                             border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
           </div>
-
           <div style={{ display:'flex', gap:8 }}>
-            <button onClick={()=>{ setShowForm(false); setItemSearch(''); }}
+            <button onClick={()=>{ setShowForm(false); resetForm(); }}
                     style={{ padding:'7px 16px', border:'1.5px solid #ddd', borderRadius:8,
                              background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
             <button disabled={saving} onClick={handleSave}
@@ -712,82 +749,77 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                 <tr style={{ background:'#f5f5f5' }}>
                   {['Person','Item','Qty','Unit Price','Total','Date','Days','Status',''].map(h=>(
                     <th key={h} style={{ padding: isMobile?'7px 8px':'9px 12px', textAlign:'left',
-                                         fontWeight:700, color:'#444', fontSize: isMobile?10:12,
-                                         whiteSpace:'nowrap' }}>{h}</th>
+                                         fontWeight:700, color:'#444', fontSize: isMobile?10:12, whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {debts.map(d=>(
-                  <tr key={d.id} style={{ borderBottom:'1px solid #f0f0f0', background: rowBg(d) }}>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:600, color: rowText(d) }}>{d.person_name}</td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.item_name}</td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.quantity}</td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{fmt(d.unit_price)}</td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700, color: d.cleared?'#aaa':'#1a3a2a' }}>{fmt(d.total_cost)}</td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', color:'#888', whiteSpace:'nowrap' }}>{d.date_added}</td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700,
-                                 color: d.cleared?'#aaa': d.days_outstanding>5?'#c62828': d.days_outstanding>=4?'#e65100':'#2e7d32' }}>
-                      {d.cleared ? '✓' : `${d.days_outstanding}d`}
-                    </td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px', whiteSpace:'nowrap' }}>
-                      {d.cleared
-                        ? <span style={{ background:'#e8f5e9', color:'#2e7d32', borderRadius:8, padding:'2px 8px', fontSize:11, fontWeight:700 }}>Cleared</span>
-                        : <span style={{ background: d.days_outstanding>5?'#ffebee': d.days_outstanding>=4?'#fff8e1':'#e3f2fd',
-                                         color: d.days_outstanding>5?'#c62828': d.days_outstanding>=4?'#e65100':'#1565c0',
-                                         borderRadius:8, padding:'2px 8px', fontSize:11, fontWeight:700 }}>
-                            {d.days_outstanding>5?'Overdue': d.days_outstanding>=4?'Due Soon':'Active'}
-                          </span>
-                      }
-                    </td>
-                    <td style={{ padding: isMobile?'8px':'10px 12px' }}>
-                      <div style={{ display:'flex', gap:4 }}>
-                        {!d.cleared && (
-                          <button onClick={()=>setModal(
-                            <div>
-                              <h3 style={{ margin:'0 0 12px', color:'#1a3a2a' }}>Mark as Cleared?</h3>
-                              <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
-                                Mark debt from <strong>{d.person_name}</strong> ({fmt(d.total_cost)}) as cleared?
-                              </p>
-                              <div style={{ display:'flex', gap:10 }}>
-                                <button onClick={()=>setModal(null)}
-                                        style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
-                                                 background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
-                                <button onClick={async()=>{ await onClear(d.id); setModal(null); }}
-                                        style={{ flex:1, padding:'9px', background:'#2e7d32', color:'#fff',
-                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>✓ Clear</button>
+                {debts.map(d => {
+                  const st = statusLabel(d);
+                  return (
+                    <tr key={d.id} style={{ borderBottom:'1px solid #f0f0f0', background: rowBg(d) }}>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:600, color: rowText(d) }}>{d.person_name}</td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.item_name}</td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.quantity}</td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{fmt(d.unit_price)}</td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700, color: d.cleared?'#aaa':'#1a3a2a' }}>{fmt(d.total_cost)}</td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', color:'#888', whiteSpace:'nowrap' }}>{d.date_added}</td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700, color: rowText(d) }}>
+                        {d.cleared ? '✓' : `${d.days_outstanding}d`}
+                      </td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px', whiteSpace:'nowrap' }}>
+                        <span style={{ background:st.bg, color:st.color, borderRadius:8,
+                                       padding:'2px 8px', fontSize:11, fontWeight:700 }}>{st.label}</span>
+                      </td>
+                      <td style={{ padding: isMobile?'8px':'10px 12px' }}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          {!d.cleared && (
+                            <button onClick={()=>setModal(
+                              <div>
+                                <h3 style={{ margin:'0 0 12px', color:'#1a3a2a' }}>Mark as Cleared?</h3>
+                                <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
+                                  Mark debt from <strong>{d.person_name}</strong> ({fmt(d.total_cost)}) as cleared?
+                                </p>
+                                <div style={{ display:'flex', gap:10 }}>
+                                  <button onClick={()=>setModal(null)}
+                                          style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
+                                                   background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+                                  <button onClick={async()=>{ await onClear(d.id); setModal(null); }}
+                                          style={{ flex:1, padding:'9px', background:'#2e7d32', color:'#fff',
+                                                   border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>✓ Clear</button>
+                                </div>
                               </div>
-                            </div>
-                          )} style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
-                                      border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                            Clear
-                          </button>
-                        )}
-                        {currentUser?.role==='admin' && (
-                          <button onClick={()=>setModal(
-                            <div>
-                              <h3 style={{ margin:'0 0 12px', color:'#c62828' }}>Delete Debt?</h3>
-                              <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
-                                Permanently delete debt from <strong>{d.person_name}</strong>?
-                              </p>
-                              <div style={{ display:'flex', gap:10 }}>
-                                <button onClick={()=>setModal(null)}
-                                        style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
-                                                 background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
-                                <button onClick={async()=>{ await onDelete(d.id); setModal(null); }}
-                                        style={{ flex:1, padding:'9px', background:'#c62828', color:'#fff',
-                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>🗑 Delete</button>
+                            )} style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
+                                        border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
+                              Clear
+                            </button>
+                          )}
+                          {currentUser?.role==='admin' && (
+                            <button onClick={()=>setModal(
+                              <div>
+                                <h3 style={{ margin:'0 0 12px', color:'#c62828' }}>Delete Debt?</h3>
+                                <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
+                                  Permanently delete debt from <strong>{d.person_name}</strong>?
+                                </p>
+                                <div style={{ display:'flex', gap:10 }}>
+                                  <button onClick={()=>setModal(null)}
+                                          style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
+                                                   background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+                                  <button onClick={async()=>{ await onDelete(d.id); setModal(null); }}
+                                          style={{ flex:1, padding:'9px', background:'#c62828', color:'#fff',
+                                                   border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>🗑 Delete</button>
+                                </div>
                               </div>
-                            </div>
-                          )} style={{ padding:'4px 8px', background:'#ffebee', color:'#c62828',
-                                      border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                            🗑
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                            )} style={{ padding:'4px 8px', background:'#ffebee', color:'#c62828',
+                                        border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
+                              🗑
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -799,7 +831,7 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
 // ============================================================
 // DASHBOARD
 // ============================================================
-function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debts, onAddDebt, onClearDebt, onDeleteDebt, currentUser, setModal, showNotif,
+function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debts, onAddDebt, onClearDebt, onDeleteDebt, settings, onSaveSettings, currentUser, setModal, showNotif,
                      totalRevenue, totalProfit, netProfit, businessInfo, setActiveTab }) {
   const isMobile = useIsMobile();                    
   const todaySales   = sales.filter(s => s.date === today());
@@ -974,7 +1006,9 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
 
       <DebtsCard debts={debts} inventory={inventory} onAdd={onAddDebt} onClear={onClearDebt}
                  onDelete={onDeleteDebt} currentUser={currentUser} setModal={setModal}
-                 showNotif={showNotif} isMobile={isMobile}/>
+                 showNotif={showNotif} isMobile={isMobile}
+                 alertDays={parseInt(settings.debt_alert_days||'3')}
+                 onSaveSettings={onSaveSettings}/>
 
       <div style={{ marginTop:20, background:'#fff', borderRadius:12, padding:20, boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
         <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:700, color:'#1a3a2a' }}>Recent Sales</h3>
