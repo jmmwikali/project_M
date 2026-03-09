@@ -201,9 +201,9 @@ function AgrovetApp() {
       setSales(sal.sales || []);
       setExpenses(exp.expenses || []);
       setUsers(usr.users || []);
+      setCategories((cats.categories || []).map(c => c.name));
       const dbt = await api('/api/debts');
       setDebts(dbt.debts || []);
-      setCategories((cats.categories || []).map(c => c.name));
     } catch (e) {
       showNotif('Failed to load data: ' + e.message, 'error');
     } finally {
@@ -504,33 +504,56 @@ function AgrovetApp() {
 // ============================================================
 // DEBTS CARD
 // ============================================================
-function DebtsCard({ debts, onAdd, onClear, onDelete, currentUser, setModal, showNotif, isMobile }) {
-  const [showForm, setShowForm] = useState(false);
-  const [saving,   setSaving]   = useState(false);
-  const [form, setForm] = useState({ person_name:'', item_name:'', quantity:'', unit_price:'', date_added:today(), notes:'' });
+function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, setModal, showNotif, isMobile }) {
+  const [showForm,   setShowForm]   = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [itemSearch, setItemSearch] = useState('');
+  const [selItem,    setSelItem]    = useState(null);  // selected inventory item
+  const [form, setForm] = useState({
+    person_name:'', quantity:'', date_added:today(), notes:''
+  });
 
-  const totalOwed = debts.filter(d=>!d.cleared).reduce((a,d)=>a+d.total_cost,0);
+  const totalOwed    = debts.filter(d=>!d.cleared).reduce((a,d)=>a+d.total_cost, 0);
   const overdueCount = debts.filter(d=>!d.cleared && d.days_outstanding>5).length;
+  const unitPrice    = selItem ? selItem.selling_price : 0;
+  const totalCost    = parseFloat(form.quantity||0) * unitPrice;
 
-  const rowColor = (d) => {
-    if (d.cleared) return '#f9f9f9';
-    if (d.days_outstanding > 5) return '#ffebee';
-    if (d.days_outstanding >= 4) return '#fff8e1';
-    return '#fff';
+  // Filter inventory — same logic as sales page
+  const available = inventory.filter(i =>
+    i.quantity > 0 &&
+    itemSearch.length > 0 &&
+    i.name.toLowerCase().includes(itemSearch.toLowerCase())
+  ).slice(0, 8);
+
+  const selectItem = (item) => {
+    setSelItem(item);
+    setItemSearch(item.name);
   };
-  const textColor = (d) => {
-    if (d.cleared) return '#aaa';
-    if (d.days_outstanding > 5) return '#c62828';
-    if (d.days_outstanding >= 4) return '#e65100';
-    return '#333';
+
+  const resetForm = () => {
+    setForm({ person_name:'', quantity:'', date_added:today(), notes:'' });
+    setItemSearch('');
+    setSelItem(null);
   };
+
+  const rowBg   = (d) => d.cleared ? '#f9f9f9' : d.days_outstanding>5 ? '#ffebee' : d.days_outstanding>=4 ? '#fff8e1' : '#fff';
+  const rowText = (d) => d.cleared ? '#aaa'     : d.days_outstanding>5 ? '#c62828' : d.days_outstanding>=4 ? '#e65100' : '#333';
 
   const handleSave = async () => {
-    if (!form.person_name||!form.item_name||!form.quantity||!form.unit_price) return;
+    if (!form.person_name.trim()) { showNotif('Enter person name', 'error'); return; }
+    if (!selItem)                  { showNotif('Select an item from inventory', 'error'); return; }
+    if (!form.quantity||parseFloat(form.quantity)<=0) { showNotif('Enter a valid quantity', 'error'); return; }
     setSaving(true);
     try {
-      await onAdd({ ...form, quantity: parseFloat(form.quantity), unit_price: parseFloat(form.unit_price) });
-      setForm({ person_name:'', item_name:'', quantity:'', unit_price:'', date_added:today(), notes:'' });
+      await onAdd({
+        person_name: form.person_name.trim(),
+        item_name:   selItem.name,
+        quantity:    parseFloat(form.quantity),
+        unit_price:  selItem.selling_price,
+        date_added:  form.date_added,
+        notes:       form.notes,
+      });
+      resetForm();
       setShowForm(false);
     } catch(e){ showNotif(e.message,'error'); }
     finally { setSaving(false); }
@@ -538,11 +561,13 @@ function DebtsCard({ debts, onAdd, onClear, onDelete, currentUser, setModal, sho
 
   return (
     <div style={{ marginTop:20, background:'#fff', borderRadius:12, padding: isMobile ? '14px 12px' : 20,
-                  boxShadow:'0 1px 8px rgba(0,0,0,0.06)', border: overdueCount>0 ? '1px solid #ffcdd2' : '1px solid #f0f0f0' }}>
+                  boxShadow:'0 1px 8px rgba(0,0,0,0.06)',
+                  border: overdueCount>0 ? '1px solid #ffcdd2' : '1px solid #f0f0f0' }}>
+
       {/* Header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
         <div>
-          <h3 style={{ margin:0, fontSize: isMobile ? 14 : 15, fontWeight:700, color:'#1a3a2a',
+          <h3 style={{ margin:0, fontSize: isMobile?14:15, fontWeight:700, color:'#1a3a2a',
                        display:'flex', alignItems:'center', gap:6 }}>
             💳 Debts
             {overdueCount>0 && (
@@ -554,52 +579,117 @@ function DebtsCard({ debts, onAdd, onClear, onDelete, currentUser, setModal, sho
           </h3>
           {totalOwed>0 && <div style={{ fontSize:11, color:'#c62828', fontWeight:600, marginTop:2 }}>Total owed: {fmt(totalOwed)}</div>}
         </div>
-        <button onClick={()=>setShowForm(!showForm)}
-                style={{ padding: isMobile ? '6px 12px' : '8px 16px', background:'#1a3a2a', color:'#fff',
-                         border:'none', borderRadius:10, cursor:'pointer', fontSize: isMobile ? 12 : 13, fontWeight:600,
-                         display:'flex', alignItems:'center', gap:6 }}>
+        <button onClick={()=>{ setShowForm(!showForm); if(showForm) resetForm(); }}
+                style={{ padding: isMobile?'6px 12px':'8px 16px', background:'#1a3a2a', color:'#fff',
+                         border:'none', borderRadius:10, cursor:'pointer', fontSize: isMobile?12:13,
+                         fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
           <Icon name="plus" size={13}/> Add Debt
         </button>
       </div>
 
       {/* Add form */}
       {showForm && (
-        <div style={{ background:'#f9f9f9', borderRadius:10, padding: isMobile ? 12 : 16, marginBottom:14,
-                      border:'1px solid #e0e0e0' }}>
-          <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr 1fr', gap:10, marginBottom:10 }}>
-            {[['Person Name','person_name','text'],['Item','item_name','text'],
-              ['Quantity','quantity','number'],['Unit Price','unit_price','number']].map(([l,f,t])=>(
-              <div key={f}>
-                <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>{l}</label>
-                <input type={t} value={form[f]} onChange={e=>setForm(p=>({...p,[f]:e.target.value}))}
-                       step={t==='number'?'0.25':undefined}
-                       style={{ width:'100%', padding:'7px 10px', borderRadius:7,
-                                border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
-              </div>
-            ))}
+        <div style={{ background:'#f9f9f9', borderRadius:10, padding: isMobile?12:16,
+                      marginBottom:14, border:'1px solid #e0e0e0' }}>
+
+          {/* Row 1: Person + Item search */}
+          <div style={{ display:'grid', gridTemplateColumns: isMobile?'1fr':'1fr 1fr', gap:10, marginBottom:10 }}>
+            {/* Person Name */}
+            <div>
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Person Name *</label>
+              <input type="text" value={form.person_name} placeholder="e.g. John Kamau"
+                     onChange={e=>setForm(p=>({...p,person_name:e.target.value}))}
+                     style={{ width:'100%', padding:'9px 12px', borderRadius:8,
+                              border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
+            </div>
+
+            {/* Item search — same style as sales page */}
+            <div style={{ position:'relative' }}>
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>
+                Item * {selItem && <span style={{ color:'#4caf50', fontSize:10, fontWeight:700 }}>✓ {fmt(selItem.selling_price)} each</span>}
+              </label>
+              <input type="text" value={itemSearch}
+                     onChange={e=>{ setItemSearch(e.target.value); setSelItem(null); }}
+                     placeholder="Search product…"
+                     style={{ width:'100%', padding:'9px 12px', borderRadius:8,
+                              border: selItem ? '1.5px solid #4caf50' : '1.5px solid #ddd',
+                              fontSize:13, boxSizing:'border-box',
+                              background: selItem ? '#f1f8e9' : '#fff' }}/>
+              {/* Dropdown — identical look to sales page */}
+              {itemSearch && !selItem && (
+                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff',
+                              borderRadius:8, boxShadow:'0 4px 20px rgba(0,0,0,0.12)', zIndex:300,
+                              maxHeight:220, overflowY:'auto', border:'1px solid #eee' }}>
+                  {available.length===0
+                    ? <div style={{ padding:12, color:'#aaa', fontSize:12 }}>No items found</div>
+                    : available.map(i=>(
+                      <div key={i.id} onClick={()=>selectItem(i)}
+                           style={{ padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f5f5f5', fontSize:13 }}
+                           onMouseEnter={e=>e.currentTarget.style.background='#f5f5f5'}
+                           onMouseLeave={e=>e.currentTarget.style.background=''}>
+                        <div style={{ fontWeight:600, color:'#222' }}>{i.name}</div>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#888' }}>
+                          <span>{i.category}</span>
+                          <span style={{ color:'#2e7d32', fontWeight:600 }}>{fmt(i.selling_price)} | {i.quantity} left</span>
+                        </div>
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+            </div>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap:10, marginBottom:10 }}>
+
+          {/* Row 2: Qty, Unit Price (read-only), Total (read-only), Date */}
+          <div style={{ display:'grid', gridTemplateColumns: isMobile?'1fr 1fr':'1fr 1fr 1fr 1fr', gap:10, marginBottom:10 }}>
+            {/* Quantity — only input the user fills */}
+            <div>
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Quantity *</label>
+              <input type="number" step="0.25" min="0.25" value={form.quantity}
+                     onChange={e=>setForm(p=>({...p,quantity:e.target.value}))}
+                     placeholder="0"
+                     style={{ width:'100%', padding:'9px 12px', borderRadius:8,
+                              border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
+            </div>
+            {/* Unit Price — read only, from inventory */}
+            <div>
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Unit Price</label>
+              <div style={{ padding:'9px 12px', borderRadius:8, border:'1.5px solid #e8f5e9',
+                            fontSize:13, background:'#f1f8e9', fontWeight:700,
+                            color: selItem ? '#2e7d32' : '#bbb' }}>
+                {selItem ? fmt(unitPrice) : '—'}
+              </div>
+            </div>
+            {/* Total — auto-calculated */}
+            <div>
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Total Cost</label>
+              <div style={{ padding:'9px 12px', borderRadius:8, border:'1.5px solid #e0e0e0',
+                            fontSize:13, background:'#f5f5f5', fontWeight:800,
+                            color: totalCost>0 ? '#1a3a2a' : '#bbb' }}>
+                {totalCost>0 ? fmt(totalCost) : '—'}
+              </div>
+            </div>
+            {/* Date */}
             <div>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Date</label>
-              <input type="date" value={form.date_added} onChange={e=>setForm(p=>({...p,date_added:e.target.value}))}
-                     style={{ width:'100%', padding:'7px 10px', borderRadius:7,
-                              border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
-            </div>
-            <div>
-              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Notes (optional)</label>
-              <input type="text" value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))}
-                     placeholder="e.g. will pay Friday"
-                     style={{ width:'100%', padding:'7px 10px', borderRadius:7,
+              <input type="date" value={form.date_added}
+                     onChange={e=>setForm(p=>({...p,date_added:e.target.value}))}
+                     style={{ width:'100%', padding:'9px 12px', borderRadius:8,
                               border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
             </div>
           </div>
-          {form.quantity && form.unit_price && (
-            <div style={{ fontSize:13, fontWeight:700, color:'#1a3a2a', marginBottom:10 }}>
-              Total: {fmt(parseFloat(form.quantity||0) * parseFloat(form.unit_price||0))}
-            </div>
-          )}
+
+          {/* Notes */}
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Notes (optional)</label>
+            <input type="text" value={form.notes} placeholder="e.g. will pay Friday"
+                   onChange={e=>setForm(p=>({...p,notes:e.target.value}))}
+                   style={{ width:'100%', padding:'7px 10px', borderRadius:7,
+                            border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
+          </div>
+
           <div style={{ display:'flex', gap:8 }}>
-            <button onClick={()=>setShowForm(false)}
+            <button onClick={()=>{ setShowForm(false); setItemSearch(''); }}
                     style={{ padding:'7px 16px', border:'1.5px solid #ddd', borderRadius:8,
                              background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
             <button disabled={saving} onClick={handleSave}
@@ -616,42 +706,41 @@ function DebtsCard({ debts, onAdd, onClear, onDelete, currentUser, setModal, sho
       {debts.length===0
         ? <div style={{ color:'#aaa', fontSize:13, padding:'12px 0' }}>No debts recorded.</div>
         : <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize: isMobile ? 11 : 13,
-                            minWidth: isMobile ? 520 : 'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize: isMobile?11:13,
+                            minWidth: isMobile?520:'auto' }}>
               <thead>
                 <tr style={{ background:'#f5f5f5' }}>
                   {['Person','Item','Qty','Unit Price','Total','Date','Days','Status',''].map(h=>(
-                    <th key={h} style={{ padding: isMobile ? '7px 8px' : '9px 12px', textAlign:'left',
-                                         fontWeight:700, color:'#444', fontSize: isMobile ? 10 : 12,
+                    <th key={h} style={{ padding: isMobile?'7px 8px':'9px 12px', textAlign:'left',
+                                         fontWeight:700, color:'#444', fontSize: isMobile?10:12,
                                          whiteSpace:'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {debts.map(d=>(
-                  <tr key={d.id} style={{ borderBottom:'1px solid #f0f0f0', background: rowColor(d) }}>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', fontWeight:600, color: textColor(d) }}>{d.person_name}</td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color: textColor(d) }}>{d.item_name}</td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color: textColor(d) }}>{d.quantity}</td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color: textColor(d) }}>{fmt(d.unit_price)}</td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', fontWeight:700, color: d.cleared?'#aaa':'#1a3a2a' }}>{fmt(d.total_cost)}</td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color:'#888', whiteSpace:'nowrap' }}>{d.date_added}</td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', fontWeight:700,
+                  <tr key={d.id} style={{ borderBottom:'1px solid #f0f0f0', background: rowBg(d) }}>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:600, color: rowText(d) }}>{d.person_name}</td>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.item_name}</td>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.quantity}</td>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{fmt(d.unit_price)}</td>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700, color: d.cleared?'#aaa':'#1a3a2a' }}>{fmt(d.total_cost)}</td>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', color:'#888', whiteSpace:'nowrap' }}>{d.date_added}</td>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700,
                                  color: d.cleared?'#aaa': d.days_outstanding>5?'#c62828': d.days_outstanding>=4?'#e65100':'#2e7d32' }}>
                       {d.cleared ? '✓' : `${d.days_outstanding}d`}
                     </td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px', whiteSpace:'nowrap' }}>
+                    <td style={{ padding: isMobile?'8px':'10px 12px', whiteSpace:'nowrap' }}>
                       {d.cleared
-                        ? <span style={{ background:'#e8f5e9', color:'#2e7d32', borderRadius:8,
-                                         padding:'2px 8px', fontSize:11, fontWeight:700 }}>Cleared</span>
+                        ? <span style={{ background:'#e8f5e9', color:'#2e7d32', borderRadius:8, padding:'2px 8px', fontSize:11, fontWeight:700 }}>Cleared</span>
                         : <span style={{ background: d.days_outstanding>5?'#ffebee': d.days_outstanding>=4?'#fff8e1':'#e3f2fd',
                                          color: d.days_outstanding>5?'#c62828': d.days_outstanding>=4?'#e65100':'#1565c0',
                                          borderRadius:8, padding:'2px 8px', fontSize:11, fontWeight:700 }}>
-                            {d.days_outstanding>5 ? 'Overdue' : d.days_outstanding>=4 ? 'Due Soon' : 'Active'}
+                            {d.days_outstanding>5?'Overdue': d.days_outstanding>=4?'Due Soon':'Active'}
                           </span>
                       }
                     </td>
-                    <td style={{ padding: isMobile ? '8px' : '10px 12px' }}>
+                    <td style={{ padding: isMobile?'8px':'10px 12px' }}>
                       <div style={{ display:'flex', gap:4 }}>
                         {!d.cleared && (
                           <button onClick={()=>setModal(
@@ -666,9 +755,7 @@ function DebtsCard({ debts, onAdd, onClear, onDelete, currentUser, setModal, sho
                                                  background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
                                 <button onClick={async()=>{ await onClear(d.id); setModal(null); }}
                                         style={{ flex:1, padding:'9px', background:'#2e7d32', color:'#fff',
-                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>
-                                  ✓ Clear
-                                </button>
+                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>✓ Clear</button>
                               </div>
                             </div>
                           )} style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
@@ -689,9 +776,7 @@ function DebtsCard({ debts, onAdd, onClear, onDelete, currentUser, setModal, sho
                                                  background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
                                 <button onClick={async()=>{ await onDelete(d.id); setModal(null); }}
                                         style={{ flex:1, padding:'9px', background:'#c62828', color:'#fff',
-                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>
-                                  🗑 Delete
-                                </button>
+                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>🗑 Delete</button>
                               </div>
                             </div>
                           )} style={{ padding:'4px 8px', background:'#ffebee', color:'#c62828',
@@ -887,8 +972,9 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
         </div>
       )}
 
-      <DebtsCard debts={debts} onAdd={onAddDebt} onClear={onClearDebt} onDelete={onDeleteDebt}
-                 currentUser={currentUser} setModal={setModal} showNotif={showNotif} isMobile={isMobile}/>
+      <DebtsCard debts={debts} inventory={inventory} onAdd={onAddDebt} onClear={onClearDebt}
+                 onDelete={onDeleteDebt} currentUser={currentUser} setModal={setModal}
+                 showNotif={showNotif} isMobile={isMobile}/>
 
       <div style={{ marginTop:20, background:'#fff', borderRadius:12, padding:20, boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
         <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:700, color:'#1a3a2a' }}>Recent Sales</h3>
