@@ -1505,9 +1505,9 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, currentUser, s
           const dp = ds.reduce((a,s) => a + s.total_profit, 0);
           return (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap: isMobile ? 8 : 12, marginBottom: isMobile ? 10 : 14 }}>
-              {[["Total Revenue", fmt(dr), '#e3f2fd', '#1565c0'],
-                ["Total Profit",  fmt(dp), '#e8f5e9', '#2e7d32'],
-                ["Total Sales",   ds.length, '#f3e5f5', '#6a1b9a']
+              {[["That Day's Revenue", fmt(dr), '#e3f2fd', '#1565c0'],
+                ["That Day's Profit",  fmt(dp), '#e8f5e9', '#2e7d32'],
+                ["That Day's Sales",   ds.length, '#f3e5f5', '#6a1b9a']
               ].map(([l,v,bg,cc]) => (
                 <div key={l} style={{ background:bg, borderRadius:12, padding: isMobile ? '12px 10px' : '14px 16px',
                                       boxShadow:'0 1px 6px rgba(0,0,0,0.06)' }}>
