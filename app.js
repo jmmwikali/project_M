@@ -1332,10 +1332,11 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, currentUser, s
                               style={{ width:24, height:24, borderRadius:6, border:'1px solid #ddd',
                                        background:'#f5f5f5', cursor:'pointer', fontSize:14,
                                        display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
-                      <input type="number" value={c.quantity} onChange={e=>updateQty(c.item_id,parseInt(e.target.value))}
-                             style={{ width:40, textAlign:'center', padding:'3px 0',
-                                      border:'1px solid #ddd', borderRadius:6, fontSize:13 }}/>
-                      <button onClick={()=>updateQty(c.item_id,c.quantity+1)}
+                      <input type="number" value={c.quantity}
+                        onChange={e=>updateQty(c.item_id, e.target.value)}
+                        step="0.25" min="0.25"
+                        style={{ width:52, textAlign:'center', padding:'3px 0', border:'1px solid #ddd', borderRadius:6, fontSize:13 }}/>
+                      <button onClick={()=>updateQty(c.item_id, Math.round((c.quantity+0.25)*100)/100)}
                               style={{ width:24, height:24, borderRadius:6, border:'1px solid #ddd',
                                        background:'#f5f5f5', cursor:'pointer', fontSize:14,
                                        display:'flex', alignItems:'center', justifyContent:'center' }}>+</button>
