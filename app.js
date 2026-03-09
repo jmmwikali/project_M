@@ -1063,8 +1063,10 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, currentUser, s
 
   const updateQty = (itemId, qty) => {
     const item = cartItems.find(c=>c.item_id===itemId);
-    if (qty<1 || qty>item.max_qty) return;
-    setCartItems(prev=>prev.map(c=>c.item_id===itemId?{...c,quantity:qty}:c));
+    const parsed = parseFloat(qty);
+    if (isNaN(parsed) || parsed <= 0 || parsed > item.max_qty) return;
+    const rounded = Math.round(parsed * 100) / 100;
+    setCartItems(prev=>prev.map(c=>c.item_id===itemId?{...c,quantity:rounded}:c));
   };
 
   const cartTotal  = cartItems.reduce((a,c)=>a+c.price*c.quantity, 0);
@@ -1326,7 +1328,7 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, currentUser, s
                       <div style={{ fontSize:11, color:'#888' }}>{fmt(c.price)} each</div>
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                      <button onClick={()=>updateQty(c.item_id,c.quantity-1)}
+                      <button onClick={()=>updateQty(c.item_id, Math.round((c.quantity-0.25)*100)/100)}
                               style={{ width:24, height:24, borderRadius:6, border:'1px solid #ddd',
                                        background:'#f5f5f5', cursor:'pointer', fontSize:14,
                                        display:'flex', alignItems:'center', justifyContent:'center' }}>−</button>
