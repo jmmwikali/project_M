@@ -165,6 +165,7 @@ function AgrovetApp() {
   const [sales,       setSales]       = useState([]);
   const [expenses,    setExpenses]    = useState([]);
   const [users,       setUsers]       = useState([]);
+  const [debts,       setDebts]       = useState([]);
   const [categories,  setCategories]  = useState([]);
   const [businessInfo] = useState({ name: 'Macys Agrofeeds', location: 'Machakos, Kenya' });
   const [notification, setNotification] = useState(null);
@@ -200,6 +201,8 @@ function AgrovetApp() {
       setSales(sal.sales || []);
       setExpenses(exp.expenses || []);
       setUsers(usr.users || []);
+      const dbt = await api('/api/debts');
+      setDebts(dbt.debts || []);
       setCategories((cats.categories || []).map(c => c.name));
     } catch (e) {
       showNotif('Failed to load data: ' + e.message, 'error');
@@ -248,6 +251,24 @@ function AgrovetApp() {
   };
 
   // ── Sales actions ─────────────────────────────────────────
+  const addDebt = async (data) => {
+    const result = await api('/api/debts', { method:'POST', body: data });
+    setDebts(prev => [...prev, result.debt]);
+    showNotif('Debt recorded.');
+  };
+
+  const clearDebt = async (id) => {
+    const result = await api(`/api/debts/${id}/clear`, { method:'POST' });
+    setDebts(prev => prev.map(d => d.id === id ? result.debt : d));
+    showNotif('Debt marked as cleared.');
+  };
+
+  const deleteDebt = async (id) => {
+    await api(`/api/debts/${id}`, { method:'DELETE' });
+    setDebts(prev => prev.filter(d => d.id !== id));
+    showNotif('Debt deleted.');
+  };
+
   const deleteSalesByDate = async (date) => {
     const data = await api(`/api/sales/by-date/${date}`, { method: 'DELETE' });
     setSales(prev => prev.filter(s => s.date !== date));
@@ -316,7 +337,9 @@ function AgrovetApp() {
     switch (activeTab) {
       case 'dashboard': return <Dashboard inventory={inventory} sales={sales} expenses={expenses}
         lowStockItems={lowStockItems} outOfStock={outOfStock} totalRevenue={totalRevenue}
-        totalProfit={totalProfit} netProfit={netProfit} businessInfo={businessInfo} setActiveTab={setActiveTab}/>;
+        totalProfit={totalProfit} netProfit={netProfit} businessInfo={businessInfo} setActiveTab={setActiveTab}
+        debts={debts} onAddDebt={addDebt} onClearDebt={clearDebt} onDeleteDebt={deleteDebt}
+        currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
       case 'inventory': return <InventoryPage inventory={inventory} categories={categories} isAdmin={isAdmin}
         onUpdate={updateInventoryItem} onAdd={addInventoryItem} onDelete={deleteInventoryItem}
         onRestock={restock} onAdjust={adjustStock} showNotif={showNotif} setModal={setModal}/>;
@@ -479,9 +502,219 @@ function AgrovetApp() {
 }
 
 // ============================================================
+// DEBTS CARD
+// ============================================================
+function DebtsCard({ debts, onAdd, onClear, onDelete, currentUser, setModal, showNotif, isMobile }) {
+  const [showForm, setShowForm] = useState(false);
+  const [saving,   setSaving]   = useState(false);
+  const [form, setForm] = useState({ person_name:'', item_name:'', quantity:'', unit_price:'', date_added:today(), notes:'' });
+
+  const totalOwed = debts.filter(d=>!d.cleared).reduce((a,d)=>a+d.total_cost,0);
+  const overdueCount = debts.filter(d=>!d.cleared && d.days_outstanding>5).length;
+
+  const rowColor = (d) => {
+    if (d.cleared) return '#f9f9f9';
+    if (d.days_outstanding > 5) return '#ffebee';
+    if (d.days_outstanding >= 4) return '#fff8e1';
+    return '#fff';
+  };
+  const textColor = (d) => {
+    if (d.cleared) return '#aaa';
+    if (d.days_outstanding > 5) return '#c62828';
+    if (d.days_outstanding >= 4) return '#e65100';
+    return '#333';
+  };
+
+  const handleSave = async () => {
+    if (!form.person_name||!form.item_name||!form.quantity||!form.unit_price) return;
+    setSaving(true);
+    try {
+      await onAdd({ ...form, quantity: parseFloat(form.quantity), unit_price: parseFloat(form.unit_price) });
+      setForm({ person_name:'', item_name:'', quantity:'', unit_price:'', date_added:today(), notes:'' });
+      setShowForm(false);
+    } catch(e){ showNotif(e.message,'error'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ marginTop:20, background:'#fff', borderRadius:12, padding: isMobile ? '14px 12px' : 20,
+                  boxShadow:'0 1px 8px rgba(0,0,0,0.06)', border: overdueCount>0 ? '1px solid #ffcdd2' : '1px solid #f0f0f0' }}>
+      {/* Header */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <div>
+          <h3 style={{ margin:0, fontSize: isMobile ? 14 : 15, fontWeight:700, color:'#1a3a2a',
+                       display:'flex', alignItems:'center', gap:6 }}>
+            💳 Debts
+            {overdueCount>0 && (
+              <span style={{ background:'#ef5350', color:'#fff', borderRadius:10,
+                             fontSize:10, padding:'2px 7px', fontWeight:700 }}>
+                {overdueCount} overdue
+              </span>
+            )}
+          </h3>
+          {totalOwed>0 && <div style={{ fontSize:11, color:'#c62828', fontWeight:600, marginTop:2 }}>Total owed: {fmt(totalOwed)}</div>}
+        </div>
+        <button onClick={()=>setShowForm(!showForm)}
+                style={{ padding: isMobile ? '6px 12px' : '8px 16px', background:'#1a3a2a', color:'#fff',
+                         border:'none', borderRadius:10, cursor:'pointer', fontSize: isMobile ? 12 : 13, fontWeight:600,
+                         display:'flex', alignItems:'center', gap:6 }}>
+          <Icon name="plus" size={13}/> Add Debt
+        </button>
+      </div>
+
+      {/* Add form */}
+      {showForm && (
+        <div style={{ background:'#f9f9f9', borderRadius:10, padding: isMobile ? 12 : 16, marginBottom:14,
+                      border:'1px solid #e0e0e0' }}>
+          <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr 1fr', gap:10, marginBottom:10 }}>
+            {[['Person Name','person_name','text'],['Item','item_name','text'],
+              ['Quantity','quantity','number'],['Unit Price','unit_price','number']].map(([l,f,t])=>(
+              <div key={f}>
+                <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>{l}</label>
+                <input type={t} value={form[f]} onChange={e=>setForm(p=>({...p,[f]:e.target.value}))}
+                       step={t==='number'?'0.25':undefined}
+                       style={{ width:'100%', padding:'7px 10px', borderRadius:7,
+                                border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap:10, marginBottom:10 }}>
+            <div>
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Date</label>
+              <input type="date" value={form.date_added} onChange={e=>setForm(p=>({...p,date_added:e.target.value}))}
+                     style={{ width:'100%', padding:'7px 10px', borderRadius:7,
+                              border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
+            </div>
+            <div>
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Notes (optional)</label>
+              <input type="text" value={form.notes} onChange={e=>setForm(p=>({...p,notes:e.target.value}))}
+                     placeholder="e.g. will pay Friday"
+                     style={{ width:'100%', padding:'7px 10px', borderRadius:7,
+                              border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
+            </div>
+          </div>
+          {form.quantity && form.unit_price && (
+            <div style={{ fontSize:13, fontWeight:700, color:'#1a3a2a', marginBottom:10 }}>
+              Total: {fmt(parseFloat(form.quantity||0) * parseFloat(form.unit_price||0))}
+            </div>
+          )}
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>setShowForm(false)}
+                    style={{ padding:'7px 16px', border:'1.5px solid #ddd', borderRadius:8,
+                             background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+            <button disabled={saving} onClick={handleSave}
+                    style={{ padding:'7px 20px', background: saving?'#81c784':'#1a3a2a', color:'#fff',
+                             border:'none', borderRadius:8, cursor: saving?'not-allowed':'pointer',
+                             fontSize:13, fontWeight:700 }}>
+              {saving ? 'Saving…' : 'Save Debt'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      {debts.length===0
+        ? <div style={{ color:'#aaa', fontSize:13, padding:'12px 0' }}>No debts recorded.</div>
+        : <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize: isMobile ? 11 : 13,
+                            minWidth: isMobile ? 520 : 'auto' }}>
+              <thead>
+                <tr style={{ background:'#f5f5f5' }}>
+                  {['Person','Item','Qty','Unit Price','Total','Date','Days','Status',''].map(h=>(
+                    <th key={h} style={{ padding: isMobile ? '7px 8px' : '9px 12px', textAlign:'left',
+                                         fontWeight:700, color:'#444', fontSize: isMobile ? 10 : 12,
+                                         whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {debts.map(d=>(
+                  <tr key={d.id} style={{ borderBottom:'1px solid #f0f0f0', background: rowColor(d) }}>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', fontWeight:600, color: textColor(d) }}>{d.person_name}</td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color: textColor(d) }}>{d.item_name}</td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color: textColor(d) }}>{d.quantity}</td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color: textColor(d) }}>{fmt(d.unit_price)}</td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', fontWeight:700, color: d.cleared?'#aaa':'#1a3a2a' }}>{fmt(d.total_cost)}</td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', color:'#888', whiteSpace:'nowrap' }}>{d.date_added}</td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', fontWeight:700,
+                                 color: d.cleared?'#aaa': d.days_outstanding>5?'#c62828': d.days_outstanding>=4?'#e65100':'#2e7d32' }}>
+                      {d.cleared ? '✓' : `${d.days_outstanding}d`}
+                    </td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px', whiteSpace:'nowrap' }}>
+                      {d.cleared
+                        ? <span style={{ background:'#e8f5e9', color:'#2e7d32', borderRadius:8,
+                                         padding:'2px 8px', fontSize:11, fontWeight:700 }}>Cleared</span>
+                        : <span style={{ background: d.days_outstanding>5?'#ffebee': d.days_outstanding>=4?'#fff8e1':'#e3f2fd',
+                                         color: d.days_outstanding>5?'#c62828': d.days_outstanding>=4?'#e65100':'#1565c0',
+                                         borderRadius:8, padding:'2px 8px', fontSize:11, fontWeight:700 }}>
+                            {d.days_outstanding>5 ? 'Overdue' : d.days_outstanding>=4 ? 'Due Soon' : 'Active'}
+                          </span>
+                      }
+                    </td>
+                    <td style={{ padding: isMobile ? '8px' : '10px 12px' }}>
+                      <div style={{ display:'flex', gap:4 }}>
+                        {!d.cleared && (
+                          <button onClick={()=>setModal(
+                            <div>
+                              <h3 style={{ margin:'0 0 12px', color:'#1a3a2a' }}>Mark as Cleared?</h3>
+                              <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
+                                Mark debt from <strong>{d.person_name}</strong> ({fmt(d.total_cost)}) as cleared?
+                              </p>
+                              <div style={{ display:'flex', gap:10 }}>
+                                <button onClick={()=>setModal(null)}
+                                        style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
+                                                 background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+                                <button onClick={async()=>{ await onClear(d.id); setModal(null); }}
+                                        style={{ flex:1, padding:'9px', background:'#2e7d32', color:'#fff',
+                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>
+                                  ✓ Clear
+                                </button>
+                              </div>
+                            </div>
+                          )} style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
+                                      border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
+                            Clear
+                          </button>
+                        )}
+                        {currentUser?.role==='admin' && (
+                          <button onClick={()=>setModal(
+                            <div>
+                              <h3 style={{ margin:'0 0 12px', color:'#c62828' }}>Delete Debt?</h3>
+                              <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
+                                Permanently delete debt from <strong>{d.person_name}</strong>?
+                              </p>
+                              <div style={{ display:'flex', gap:10 }}>
+                                <button onClick={()=>setModal(null)}
+                                        style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
+                                                 background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+                                <button onClick={async()=>{ await onDelete(d.id); setModal(null); }}
+                                        style={{ flex:1, padding:'9px', background:'#c62828', color:'#fff',
+                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>
+                                  🗑 Delete
+                                </button>
+                              </div>
+                            </div>
+                          )} style={{ padding:'4px 8px', background:'#ffebee', color:'#c62828',
+                                      border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
+                            🗑
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+      }
+    </div>
+  );
+}
+
+// ============================================================
 // DASHBOARD
 // ============================================================
-function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock,
+function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debts, onAddDebt, onClearDebt, onDeleteDebt, currentUser, setModal, showNotif,
                      totalRevenue, totalProfit, netProfit, businessInfo, setActiveTab }) {
   const isMobile = useIsMobile();                    
   const todaySales   = sales.filter(s => s.date === today());
@@ -653,6 +886,9 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock,
           </div>
         </div>
       )}
+
+      <DebtsCard debts={debts} onAdd={onAddDebt} onClear={onClearDebt} onDelete={onDeleteDebt}
+                 currentUser={currentUser} setModal={setModal} showNotif={showNotif} isMobile={isMobile}/>
 
       <div style={{ marginTop:20, background:'#fff', borderRadius:12, padding:20, boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
         <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:700, color:'#1a3a2a' }}>Recent Sales</h3>
