@@ -280,6 +280,14 @@ function AgrovetApp() {
     showNotif(data.message, 'success');
   };
 
+  const deleteSale = async (saleId) => {
+    await api(`/api/sales/${saleId}`, { method: 'DELETE' });
+    setSales(prev => prev.filter(s => s.id !== saleId));
+    const inv = await api('/api/items');
+    setInventory(inv.items || []);
+    showNotif('Sale deleted and stock restored.');
+  };
+
   const addSale = async (saleData) => {
     const data = await api('/api/sales', { method:'POST', body: saleData });
     setSales(prev => [data.sale, ...prev]);
@@ -350,7 +358,7 @@ function AgrovetApp() {
         onUpdate={updateInventoryItem} onAdd={addInventoryItem} onDelete={deleteInventoryItem}
         onRestock={restock} onAdjust={adjustStock} showNotif={showNotif} setModal={setModal}/>;
       case 'sales':    return <SalesPage inventory={inventory} sales={sales} onAddSale={addSale}
-        onDeleteByDate={deleteSalesByDate} currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
+        onDeleteByDate={deleteSalesByDate} onDeleteSale={deleteSale} currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
       case 'expenses': return <ExpensesPage expenses={expenses} onAdd={addExpense} onDelete={deleteExpense}
         isAdmin={isAdmin} netProfit={netProfit} totalProfit={totalProfit}/>;
       case 'reports':  return <ReportsPage businessInfo={businessInfo}/>;
@@ -1395,7 +1403,7 @@ function InventoryPage({ inventory, categories, isAdmin, onUpdate, onAdd, onDele
 // ============================================================
 // SALES PAGE
 // ============================================================
-function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, currentUser, setModal, showNotif }) {
+function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, currentUser, setModal, showNotif }) {
   const isMobile = useIsMobile();
   const [cartItems,   setCartItems]   = useState([]);
   const [searchItem,  setSearchItem]  = useState('');
@@ -1592,11 +1600,35 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, currentUser, s
                         <span style={{ fontWeight:700, color:'#1565c0', fontSize:13, marginRight:10 }}>{fmt(s.total_amount)}</span>
                         <span style={{ fontWeight:700, color:'#2e7d32', fontSize:13 }}>{fmt(s.total_profit)}</span>
                       </div>
-                      <button onClick={async()=>{ const d=await api(`/api/sales/${s.id}/receipt`); setViewReceipt(d.receipt); }}
-                              style={{ padding:'3px 10px', background:'#e8f5e9', color:'#2e7d32',
-                                       border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                        Receipt
-                      </button>
+                      <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={async()=>{ const d=await api(`/api/sales/${s.id}/receipt`); setViewReceipt(d.receipt); }}
+                                style={{ padding:'3px 10px', background:'#e8f5e9', color:'#2e7d32',
+                                         border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
+                          Receipt
+                        </button>
+                        {currentUser?.role==='admin' && (
+                          <button onClick={()=>setModal(
+                            <div>
+                              <h3 style={{ margin:'0 0 10px', color:'#c62828' }}>Delete this sale?</h3>
+                              <p style={{ color:'#666', fontSize:13, margin:'0 0 16px' }}>
+                                {s.date} — {fmt(s.total_amount)}<br/>
+                                Stock will be restored automatically.
+                              </p>
+                              <div style={{ display:'flex', gap:10 }}>
+                                <button onClick={()=>setModal(null)}
+                                        style={{ flex:1, padding:'8px', border:'1.5px solid #ddd', borderRadius:8,
+                                                 background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+                                <button onClick={async()=>{ await onDeleteSale(s.id); setModal(null); }}
+                                        style={{ flex:1, padding:'8px', background:'#c62828', color:'#fff',
+                                                 border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>Delete</button>
+                              </div>
+                            </div>
+                          )} style={{ padding:'3px 8px', background:'#ffebee', color:'#c62828',
+                                      border:'none', borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                            ✕
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -1624,11 +1656,35 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, currentUser, s
                       <td style={{ padding:'10px 12px', fontWeight:700, color:'#1565c0' }}>{fmt(s.total_amount)}</td>
                       <td style={{ padding:'10px 12px', fontWeight:700, color:'#2e7d32' }}>{fmt(s.total_profit)}</td>
                       <td style={{ padding:'10px 12px' }}>
-                        <button onClick={async()=>{ const d=await api(`/api/sales/${s.id}/receipt`); setViewReceipt(d.receipt); }}
-                                style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
-                                         border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                          Receipt
-                        </button>
+                        <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                          <button onClick={async()=>{ const d=await api(`/api/sales/${s.id}/receipt`); setViewReceipt(d.receipt); }}
+                                  style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
+                                           border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
+                            Receipt
+                          </button>
+                          {currentUser?.role==='admin' && (
+                            <button onClick={()=>setModal(
+                              <div>
+                                <h3 style={{ margin:'0 0 10px', color:'#c62828' }}>Delete this sale?</h3>
+                                <p style={{ color:'#666', fontSize:13, margin:'0 0 16px' }}>
+                                  {s.date} — {fmt(s.total_amount)}<br/>
+                                  Stock will be restored automatically.
+                                </p>
+                                <div style={{ display:'flex', gap:10 }}>
+                                  <button onClick={()=>setModal(null)}
+                                          style={{ flex:1, padding:'8px', border:'1.5px solid #ddd', borderRadius:8,
+                                                   background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+                                  <button onClick={async()=>{ await onDeleteSale(s.id); setModal(null); }}
+                                          style={{ flex:1, padding:'8px', background:'#c62828', color:'#fff',
+                                                   border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>Delete</button>
+                                </div>
+                              </div>
+                            )} style={{ padding:'4px 8px', background:'#ffebee', color:'#c62828',
+                                        border:'none', borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
