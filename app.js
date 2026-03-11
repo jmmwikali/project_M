@@ -17,7 +17,7 @@ function useIsMobile() {
   return isMobile;
 }
 
-const API_BASE = 'https://project-b-35y2.onrender.com';
+const API_BASE = 'https://jmkali.alwaysdata.net';
 
 // ── API helper ────────────────────────────────────────────────
 async function api(path, options = {}) {
