@@ -1237,7 +1237,7 @@ function InventoryPage({ inventory, categories, isAdmin, onUpdate, onAdd, onDele
                 {categories.map(c=><option key={c}>{c}</option>)}
               </select>
             </div>
-            <InpF label="Cost Price (KES)"    field="cost_price"      type="number" obj={newItem} setObj={setNewItem}/>
+            <InpF label="Buying Price (KES)"    field="cost_price"      type="number" obj={newItem} setObj={setNewItem}/>
             <InpF label="Selling Price (KES)" field="selling_price"   type="number" obj={newItem} setObj={setNewItem}/>
             <InpF label="Quantity"            field="quantity"        type="number" obj={newItem} setObj={setNewItem}/>
             <InpF label="Min Stock Level"     field="min_stock_level" type="number" obj={newItem} setObj={setNewItem}/>
@@ -1293,7 +1293,7 @@ function InventoryPage({ inventory, categories, isAdmin, onUpdate, onAdd, onDele
                 <tr key={item.id} style={{ background:'#f0f7f0' }}>
                   <td colSpan={9} style={{ padding:14 }}>
                     <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:10 }}>
-                      {[['name','Name'],['cost_price','Cost Price'],['selling_price','Sell Price'],
+                      {[['name','Name'],['cost_price','Buying Price'],['selling_price','Sell Price'],
                         ['quantity','Quantity'],['min_stock_level','Min Level'],['supplier_name','Supplier']
                       ].map(([f,l])=>(
                         <div key={f}>
