@@ -1456,32 +1456,36 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
 
   if (viewReceipt) return (
     <div style={{ maxWidth:480, margin:'0 auto' }}>
-      <div style={{ background:'#fff', borderRadius:12, padding:28, boxShadow:'0 2px 20px rgba(0,0,0,0.1)',
-                    fontFamily:'monospace', fontSize:13 }}>
+      <div style={{ background:'#fff', borderRadius:12, padding:'20px 14px', boxShadow:'0 2px 20px rgba(0,0,0,0.1)',
+                    fontFamily:'monospace', fontSize:12 }}>
         <div style={{ textAlign:'center', marginBottom:14 }}>
-          <div style={{ fontSize:16, fontWeight:800 }}>🌱 MACY'S AGROFEEDS</div>
-          <div style={{ color:'#666' }}>Machakos, Kenya</div>
+          <div style={{ fontSize:15, fontWeight:800 }}>🌱 MACY'S AGROFEEDS</div>
+          <div style={{ color:'#666', fontSize:11 }}>Machakos, Kenya</div>
           <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
-          <div>Date: {viewReceipt.date}  {viewReceipt.time}</div>
-          <div>Receipt: {viewReceipt.receipt_number}</div>
-          <div>Cashier: {viewReceipt.cashier || currentUser.name}</div>
+          <div style={{ fontSize:11 }}>Date: {viewReceipt.date}  {viewReceipt.time}</div>
+          <div style={{ fontSize:11 }}>Receipt: {viewReceipt.receipt_number}</div>
+          <div style={{ fontSize:11 }}>Cashier: {viewReceipt.cashier || currentUser.name}</div>
           <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
         </div>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
+          <colgroup>
+            <col style={{ width:'68%' }}/>
+            <col style={{ width:'32%' }}/>
+          </colgroup>
           <thead><tr style={{ borderBottom:'1px dashed #aaa' }}>
-            <th style={{ textAlign:'left', padding:'5px 0', fontSize:11, letterSpacing:'0.5px' }}>ITEM</th>
-            <th style={{ textAlign:'right', padding:'5px 0', fontSize:11, letterSpacing:'0.5px' }}>TOTAL</th>
+            <th style={{ textAlign:'left', padding:'4px 4px 4px 0', fontSize:10, letterSpacing:'0.5px' }}>ITEM</th>
+            <th style={{ textAlign:'right', padding:'4px 0', fontSize:10, letterSpacing:'0.5px' }}>TOTAL</th>
           </tr></thead>
           <tbody>
             {(viewReceipt.items||[]).map((it,i)=>(
               <tr key={i} style={{ borderBottom:'1px dotted #ddd' }}>
-                <td style={{ padding:'7px 0 6px' }}>
-                  <div style={{ fontWeight:600, color:'#111', fontSize:12 }}>{it.name}</div>
-                  <div style={{ fontSize:10.5, color:'#888', marginTop:2 }}>
+                <td style={{ padding:'5px 4px 5px 0', verticalAlign:'top' }}>
+                  <div style={{ fontWeight:600, color:'#111', fontSize:11, wordBreak:'break-word' }}>{it.name}</div>
+                  <div style={{ fontSize:10, color:'#888', marginTop:1 }}>
                     {it.quantity} &times; {fmt(it.unit_price)}
                   </div>
                 </td>
-                <td style={{ textAlign:'right', verticalAlign:'middle', fontWeight:600, fontSize:12, whiteSpace:'nowrap', paddingLeft:8 }}>
+                <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:600, fontSize:11, paddingTop:5, wordBreak:'break-word' }}>
                   {fmt(it.total)}
                 </td>
               </tr>
