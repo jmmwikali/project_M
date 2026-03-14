@@ -1,7 +1,7 @@
 // ============================================================
 // AGROVET BUSINESS MANAGEMENT SYSTEM
-// Frontend fully connected to Flask/PostgreSQL backend
-// API: https://agrovet-api.onrender.com
+// Frontend fully connected to Flask backend
+// API: https://jmkali.alwaysdata.net/
 // ============================================================
 
 const { useState, useEffect, useCallback } = React;
@@ -1468,19 +1468,22 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
           <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
         </div>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-          <thead><tr style={{ borderBottom:'1px dashed #ccc' }}>
-            <th style={{ textAlign:'left', padding:'4px 0' }}>Item</th>
-            <th style={{ textAlign:'right' }}>Qty</th>
-            <th style={{ textAlign:'right' }}>Price</th>
-            <th style={{ textAlign:'right' }}>Total</th>
+          <thead><tr style={{ borderBottom:'1px dashed #aaa' }}>
+            <th style={{ textAlign:'left', padding:'5px 0', fontSize:11, letterSpacing:'0.5px' }}>ITEM</th>
+            <th style={{ textAlign:'right', padding:'5px 0', fontSize:11, letterSpacing:'0.5px' }}>TOTAL</th>
           </tr></thead>
           <tbody>
             {(viewReceipt.items||[]).map((it,i)=>(
-              <tr key={i} style={{ borderBottom:'1px dotted #eee' }}>
-                <td style={{ padding:'4px 0' }}>{it.name}</td>
-                <td style={{ textAlign:'right' }}>{it.quantity}</td>
-                <td style={{ textAlign:'right' }}>{fmt(it.unit_price)}</td>
-                <td style={{ textAlign:'right' }}>{fmt(it.total)}</td>
+              <tr key={i} style={{ borderBottom:'1px dotted #ddd' }}>
+                <td style={{ padding:'7px 0 6px' }}>
+                  <div style={{ fontWeight:600, color:'#111', fontSize:12 }}>{it.name}</div>
+                  <div style={{ fontSize:10.5, color:'#888', marginTop:2 }}>
+                    {it.quantity} &times; {fmt(it.unit_price)}
+                  </div>
+                </td>
+                <td style={{ textAlign:'right', verticalAlign:'middle', fontWeight:600, fontSize:12, whiteSpace:'nowrap', paddingLeft:8 }}>
+                  {fmt(it.total)}
+                </td>
               </tr>
             ))}
           </tbody>
