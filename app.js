@@ -1454,61 +1454,252 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
 
   const filteredSales = sales.filter(s => !dateFilter || s.date===dateFilter);
 
+  // ── Receipt view ──────────────────────────────────────────────
+  // Mobile: styled card matching reference image (dark header, scalloped edge, clean body)
+  // Desktop: original compact monospace layout, unchanged
+  // Print: only .receipt-printable is visible when printing
   if (viewReceipt) return (
-    <div style={{ maxWidth:480, margin:'0 auto' }}>
-      <div style={{ background:'#fff', borderRadius:12, padding:'20px 14px', boxShadow:'0 2px 20px rgba(0,0,0,0.1)',
-                    fontFamily:'monospace', fontSize:12 }}>
-        <div style={{ textAlign:'center', marginBottom:14 }}>
-          <div style={{ fontSize:15, fontWeight:800 }}>🌱 MACY'S AGROFEEDS</div>
-          <div style={{ color:'#666', fontSize:11 }}>Machakos, Kenya</div>
-          <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
-          <div style={{ fontSize:11 }}>Date: {viewReceipt.date}  {viewReceipt.time}</div>
-          <div style={{ fontSize:11 }}>Receipt: {viewReceipt.receipt_number}</div>
-          <div style={{ fontSize:11 }}>Cashier: {viewReceipt.cashier || currentUser.name}</div>
-          <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
-        </div>
-        <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
-          <colgroup>
-            <col style={{ width:'68%' }}/>
-            <col style={{ width:'32%' }}/>
-          </colgroup>
-          <thead><tr style={{ borderBottom:'1px dashed #aaa' }}>
-            <th style={{ textAlign:'left', padding:'4px 4px 4px 0', fontSize:10, letterSpacing:'0.5px' }}>ITEM</th>
-            <th style={{ textAlign:'right', padding:'4px 0', fontSize:10, letterSpacing:'0.5px' }}>TOTAL</th>
-          </tr></thead>
-          <tbody>
-            {(viewReceipt.items||[]).map((it,i)=>(
-              <tr key={i} style={{ borderBottom:'1px dotted #ddd' }}>
-                <td style={{ padding:'5px 4px 5px 0', verticalAlign:'top' }}>
-                  <div style={{ fontWeight:600, color:'#111', fontSize:11, wordBreak:'break-word' }}>{it.name}</div>
-                  <div style={{ fontSize:10, color:'#888', marginTop:1 }}>
-                    {it.quantity} &times; {fmt(it.unit_price)}
-                  </div>
-                </td>
-                <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:600, fontSize:11, paddingTop:5, wordBreak:'break-word' }}>
-                  {fmt(it.total)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:10 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800, fontSize:15 }}>
-            <span>TOTAL</span><span>{fmt(viewReceipt.total)}</span>
+    <>
+      {/* ── Print stylesheet injected inline so no separate CSS file is needed ── */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          .receipt-printable, .receipt-printable * { visibility: visible !important; }
+          .receipt-printable {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 24px !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+          }
+          /* Hide buttons when printing */
+          .receipt-no-print { display: none !important; }
+        }
+
+        /* ── Scalloped / zigzag bottom edge on the dark header ── */
+        .receipt-header-scallop {
+          position: relative;
+          background: #1a3a2a;
+          padding: 28px 20px 36px;
+          text-align: center;
+          border-radius: 14px 14px 0 0;
+        }
+        .receipt-header-scallop::after {
+          content: '';
+          position: absolute;
+          bottom: -1px;
+          left: 0;
+          right: 0;
+          height: 20px;
+          background: radial-gradient(circle at 10px -1px, transparent 12px, #fff 13px);
+          background-size: 20px 20px;
+          background-repeat: repeat-x;
+        }
+
+        /* ── Mobile-only receipt card styles ── */
+        @media (max-width: 768px) {
+          .receipt-card-mobile {
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+          }
+          .receipt-meta-mobile {
+            padding: 18px 20px 10px;
+            text-align: center;
+            font-size: 13px;
+            color: #333;
+            line-height: 1.7;
+          }
+          .receipt-body-mobile {
+            padding: 6px 18px 14px;
+          }
+          .receipt-thankyou-mobile {
+            background: #e8f5e9;
+            padding: 11px 16px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: #2e7d32;
+            letter-spacing: 0.3px;
+          }
+        }
+
+        /* ── Desktop: keep original monospace look ── */
+        @media (min-width: 769px) {
+          .receipt-card-desktop {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px 14px;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+            font-family: monospace;
+            font-size: 12px;
+          }
+        }
+      `}</style>
+
+      {/* ── Outer wrapper ── */}
+      <div className="receipt-printable" style={{ maxWidth: isMobile ? '100%' : 480, margin:'0 auto' }}>
+
+        {/* ════════════════════════════════
+            MOBILE LAYOUT
+            ════════════════════════════════ */}
+        {isMobile && (
+          <div className="receipt-card-mobile">
+
+            {/* Dark green header with sprout icon */}
+            <div className="receipt-header-scallop">
+              {/* Sprout icon — inline SVG matching reference */}
+              <div style={{ marginBottom:8 }}>
+                <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="18" cy="18" r="18" fill="#2e7d32"/>
+                  <path d="M18 26V16" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
+                  <path d="M18 20 C18 20 13 18 13 13 C13 13 18 13 18 20Z" fill="#fff"/>
+                  <path d="M18 18 C18 18 23 16 23 11 C23 11 18 11 18 18Z" fill="#a5d6a7"/>
+                </svg>
+              </div>
+              <div style={{ color:'#fff', fontSize:18, fontWeight:800, letterSpacing:'1px', marginBottom:2 }}>
+                MACY'S AGROFEEDS
+              </div>
+              <div style={{ color:'#81c784', fontSize:12, fontWeight:400 }}>
+                Machakos, Kenya
+              </div>
+            </div>
+
+            {/* Meta: date, receipt number, cashier */}
+            <div className="receipt-meta-mobile">
+              <div>Date: {viewReceipt.date} &nbsp; {viewReceipt.time}</div>
+              <div>Receipt: {viewReceipt.receipt_number}</div>
+              <div>Cashier: {viewReceipt.cashier || currentUser.name}</div>
+            </div>
+
+            {/* Items table */}
+            <div className="receipt-body-mobile">
+              <div style={{ borderTop:'1px dashed #ccc', marginBottom:10 }}/>
+              <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
+                <colgroup>
+                  <col style={{ width:'62%' }}/>
+                  <col style={{ width:'38%' }}/>
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign:'left', fontSize:11, fontWeight:700, color:'#555',
+                                 letterSpacing:'0.8px', paddingBottom:8 }}>ITEM</th>
+                    <th style={{ textAlign:'right', fontSize:11, fontWeight:700, color:'#555',
+                                 letterSpacing:'0.8px', paddingBottom:8 }}>TOTAL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(viewReceipt.items||[]).map((it,i)=>(
+                    <tr key={i} style={{ borderBottom:'1px solid #f0f0f0' }}>
+                      <td style={{ padding:'10px 6px 10px 0', verticalAlign:'top' }}>
+                        {/* Item name — bold, dark */}
+                        <div style={{ fontWeight:700, color:'#111', fontSize:13, wordBreak:'break-word' }}>
+                          {it.name}
+                        </div>
+                        {/* Qty × unit price — muted, smaller */}
+                        <div style={{ fontSize:11, color:'#888', marginTop:3 }}>
+                          {it.quantity} &times; {fmt(it.unit_price)}
+                        </div>
+                      </td>
+                      <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:700,
+                                   fontSize:13, paddingTop:10, color:'#111', wordBreak:'break-word' }}>
+                        {fmt(it.total)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Grand total row */}
+              <div style={{ borderTop:'1.5px dashed #bbb', marginTop:10, paddingTop:12,
+                            display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ fontWeight:800, fontSize:15, color:'#111', letterSpacing:'0.5px' }}>TOTAL</span>
+                <span style={{ fontWeight:800, fontSize:18, color:'#111' }}>{fmt(viewReceipt.total)}</span>
+              </div>
+            </div>
+
+            {/* Thank-you footer with diamond decorators */}
+            <div className="receipt-thankyou-mobile">
+              ✦ Thank you for shopping! ✦
+            </div>
+
+            {/* ── Buttons — NOT modified, exact same handlers & styles as original ── */}
+            <div className="receipt-no-print" style={{ display:'flex', gap:8, padding:'14px 18px' }}>
+              <button onClick={()=>window.print()}
+                      style={{ flex:1, padding:'9px', background:'#1a3a2a', color:'#fff', border:'none',
+                               borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
+              <button onClick={()=>setViewReceipt(null)}
+                      style={{ flex:1, padding:'9px', background:'#f5f5f5', color:'#555', border:'none',
+                               borderRadius:8, cursor:'pointer', fontSize:13 }}>Close</button>
+            </div>
           </div>
-        </div>
-        <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:8,
-                      textAlign:'center', color:'#666', fontSize:11 }}>Thank you for shopping!</div>
-        <div style={{ display:'flex', gap:8, marginTop:16 }}>
-          <button onClick={()=>window.print()}
-                  style={{ flex:1, padding:'9px', background:'#1a3a2a', color:'#fff', border:'none',
-                           borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
-          <button onClick={()=>setViewReceipt(null)}
-                  style={{ flex:1, padding:'9px', background:'#f5f5f5', color:'#555', border:'none',
-                           borderRadius:8, cursor:'pointer', fontSize:13 }}>Close</button>
-        </div>
+        )}
+
+        {/* ════════════════════════════════
+            DESKTOP LAYOUT — unchanged
+            ════════════════════════════════ */}
+        {!isMobile && (
+          <div className="receipt-card-desktop">
+            <div style={{ textAlign:'center', marginBottom:14 }}>
+              <div style={{ fontSize:15, fontWeight:800 }}>🌱 MACY'S AGROFEEDS</div>
+              <div style={{ color:'#666', fontSize:11 }}>Machakos, Kenya</div>
+              <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
+              <div style={{ fontSize:11 }}>Date: {viewReceipt.date}  {viewReceipt.time}</div>
+              <div style={{ fontSize:11 }}>Receipt: {viewReceipt.receipt_number}</div>
+              <div style={{ fontSize:11 }}>Cashier: {viewReceipt.cashier || currentUser.name}</div>
+              <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
+            </div>
+            <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
+              <colgroup>
+                <col style={{ width:'68%' }}/>
+                <col style={{ width:'32%' }}/>
+              </colgroup>
+              <thead><tr style={{ borderBottom:'1px dashed #aaa' }}>
+                <th style={{ textAlign:'left', padding:'4px 4px 4px 0', fontSize:10, letterSpacing:'0.5px' }}>ITEM</th>
+                <th style={{ textAlign:'right', padding:'4px 0', fontSize:10, letterSpacing:'0.5px' }}>TOTAL</th>
+              </tr></thead>
+              <tbody>
+                {(viewReceipt.items||[]).map((it,i)=>(
+                  <tr key={i} style={{ borderBottom:'1px dotted #ddd' }}>
+                    <td style={{ padding:'5px 4px 5px 0', verticalAlign:'top' }}>
+                      <div style={{ fontWeight:600, color:'#111', fontSize:11, wordBreak:'break-word' }}>{it.name}</div>
+                      <div style={{ fontSize:10, color:'#888', marginTop:1 }}>
+                        {it.quantity} &times; {fmt(it.unit_price)}
+                      </div>
+                    </td>
+                    <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:600, fontSize:11, paddingTop:5, wordBreak:'break-word' }}>
+                      {fmt(it.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:10 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800, fontSize:15 }}>
+                <span>TOTAL</span><span>{fmt(viewReceipt.total)}</span>
+              </div>
+            </div>
+            <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:8,
+                          textAlign:'center', color:'#666', fontSize:11 }}>Thank you for shopping!</div>
+            {/* ── Buttons — NOT modified ── */}
+            <div className="receipt-no-print" style={{ display:'flex', gap:8, marginTop:16 }}>
+              <button onClick={()=>window.print()}
+                      style={{ flex:1, padding:'9px', background:'#1a3a2a', color:'#fff', border:'none',
+                               borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
+              <button onClick={()=>setViewReceipt(null)}
+                      style={{ flex:1, padding:'9px', background:'#f5f5f5', color:'#555', border:'none',
+                               borderRadius:8, cursor:'pointer', fontSize:13 }}>Close</button>
+            </div>
+          </div>
+        )}
+
       </div>
-    </div>
+    </>
   );
 
   return (
