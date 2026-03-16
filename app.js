@@ -1,7 +1,7 @@
 // ============================================================
 // AGROVET BUSINESS MANAGEMENT SYSTEM
-// Frontend fully connected to Flask backend
-// API: https://jmkali.alwaysdata.net/
+// Frontend fully connected to Flask/PostgreSQL backend
+// API: https://agrovet-api.onrender.com
 // ============================================================
 
 const { useState, useEffect, useCallback } = React;
@@ -182,30 +182,44 @@ function AgrovetApp() {
   // ── Check existing session on mount ──────────────────────
   useEffect(() => {
     api('/api/auth/me')
-      .then(d => { setCurrentUser(d.user); loadAll(); })
+      .then(d => { setCurrentUser(d.user); loadAll(d.user); })
       .catch(() => {})
       .finally(() => setAuthChecked(true));
   }, []);
 
   // ── Load all data from backend ────────────────────────────
-  const loadAll = async () => {
+  const loadAll = async (user) => {
     setLoading(true);
+    const role = user?.role || currentUser?.role;
     try {
-      const [inv, sal, exp, usr, cats] = await Promise.all([
-        api('/api/items'),
-        api('/api/sales'),
-        api('/api/expenses'),
-        api('/api/users').catch(() => ({ users: [] })),
-        api('/api/categories'),
-      ]);
-      setInventory(inv.items || []);
-      setSales(sal.sales || []);
-      setExpenses(exp.expenses || []);
-      setUsers(usr.users || []);
-      setCategories((cats.categories || []).map(c => c.name));
-      const [dbt, sett] = await Promise.all([api('/api/debts'), api('/api/settings')]);
-      setDebts(dbt.debts || []);
-      setSettings(prev => ({ ...prev, ...sett }));
+      if (role === 'attendant') {
+        // Attendant: only load items (for cart search) and today's sales
+        const [inv, sal, cats] = await Promise.all([
+          api('/api/items'),
+          api('/api/sales'),
+          api('/api/categories'),
+        ]);
+        setInventory(inv.items || []);
+        setSales(sal.sales || []);
+        setCategories((cats.categories || []).map(c => c.name));
+      } else {
+        // Admin: load everything
+        const [inv, sal, exp, usr, cats] = await Promise.all([
+          api('/api/items'),
+          api('/api/sales'),
+          api('/api/expenses'),
+          api('/api/users').catch(() => ({ users: [] })),
+          api('/api/categories'),
+        ]);
+        setInventory(inv.items || []);
+        setSales(sal.sales || []);
+        setExpenses(exp.expenses || []);
+        setUsers(usr.users || []);
+        setCategories((cats.categories || []).map(c => c.name));
+        const [dbt, sett] = await Promise.all([api('/api/debts'), api('/api/settings')]);
+        setDebts(dbt.debts || []);
+        setSettings(prev => ({ ...prev, ...sett }));
+      }
     } catch (e) {
       showNotif('Failed to load data: ' + e.message, 'error');
     } finally {
@@ -213,7 +227,7 @@ function AgrovetApp() {
     }
   };
 
-  const handleLogin = (user) => { setCurrentUser(user); loadAll(); };
+  const handleLogin = (user) => { setCurrentUser(user); loadAll(user); };
 
   const handleLogout = async () => {
     await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
@@ -294,6 +308,9 @@ function AgrovetApp() {
     // Refresh inventory quantities after sale
     const inv = await api('/api/items');
     setInventory(inv.items || []);
+    // Also refresh today's sales for attendant
+    const sal = await api('/api/sales');
+    setSales(sal.sales || []);
     showNotif('Sale recorded successfully!');
     return data;
   };
@@ -318,8 +335,9 @@ function AgrovetApp() {
   const totalProfit    = sales.reduce((a,s) => a + s.total_profit, 0);
   const totalExpenses  = expenses.reduce((a,e) => a + e.amount, 0);
   const netProfit      = totalProfit - totalExpenses;
-  const isAdmin        = currentUser?.role === 'admin';
-  const isMobile      = useIsMobile();
+  const isAdmin      = currentUser?.role === 'admin';
+  const isAttendant  = currentUser?.role === 'attendant';
+  const isMobile     = useIsMobile();
 
   // ── Show login if not authenticated ──────────────────────
   if (!authChecked) {
@@ -332,14 +350,37 @@ function AgrovetApp() {
   }
   if (!currentUser) return <LoginScreen onLogin={handleLogin}/>;
 
-  const tabs = [
-    { id:'dashboard', label:'Dashboard', icon:'dashboard' },
-    { id:'inventory', label:'Inventory', icon:'inventory' },
-    { id:'sales',     label:'Sales',     icon:'sales'     },
-    { id:'expenses',  label:'Expenses',  icon:'expenses'  },
-    { id:'reports',   label:'Reports',   icon:'reports'   },
-    ...(isAdmin ? [{ id:'users', label:'Users', icon:'users' }] : []),
-  ];
+  // ── Tabs: attendant sees only Sales ──────────────────────
+  const tabs = isAttendant
+    ? [{ id:'sales', label:'Sales', icon:'sales' }]
+    : [
+        { id:'dashboard', label:'Dashboard', icon:'dashboard' },
+        { id:'inventory', label:'Inventory', icon:'inventory' },
+        { id:'sales',     label:'Sales',     icon:'sales'     },
+        { id:'expenses',  label:'Expenses',  icon:'expenses'  },
+        { id:'reports',   label:'Reports',   icon:'reports'   },
+        { id:'users',     label:'Users',     icon:'users'     },
+      ];
+
+  // ── Force attendant to sales tab if they somehow land elsewhere ──
+  useEffect(() => {
+    if (isAttendant && activeTab !== 'sales') {
+      setActiveTab('sales');
+    }
+  }, [isAttendant, activeTab]);
+
+  // ── Blocked page shown when attendant tries a restricted page ──
+  const AccessDenied = () => (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
+                  justifyContent:'center', minHeight:320, gap:16 }}>
+      <div style={{ fontSize:52 }}>🔒</div>
+      <div style={{ fontSize:20, fontWeight:800, color:'#1a3a2a' }}>Admin privileges required.</div>
+      <div style={{ fontSize:14, color:'#888', textAlign:'center', maxWidth:320 }}>
+        You do not have permission to view this page.<br/>
+        Please contact your administrator.
+      </div>
+    </div>
+  );
 
   const renderPage = () => {
     if (loading) return (
@@ -347,6 +388,10 @@ function AgrovetApp() {
         <Spinner size={28}/> Loading data…
       </div>
     );
+
+    // Attendant guard — block every page except sales
+    if (isAttendant && activeTab !== 'sales') return <AccessDenied />;
+
     switch (activeTab) {
       case 'dashboard': return <Dashboard inventory={inventory} sales={sales} expenses={expenses}
         lowStockItems={lowStockItems} outOfStock={outOfStock} totalRevenue={totalRevenue}
@@ -358,7 +403,8 @@ function AgrovetApp() {
         onUpdate={updateInventoryItem} onAdd={addInventoryItem} onDelete={deleteInventoryItem}
         onRestock={restock} onAdjust={adjustStock} showNotif={showNotif} setModal={setModal}/>;
       case 'sales':    return <SalesPage inventory={inventory} sales={sales} onAddSale={addSale}
-        onDeleteByDate={deleteSalesByDate} onDeleteSale={deleteSale} currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
+        onDeleteByDate={deleteSalesByDate} onDeleteSale={deleteSale} currentUser={currentUser}
+        setModal={setModal} showNotif={showNotif} isAdmin={isAdmin}/>;
       case 'expenses': return <ExpensesPage expenses={expenses} onAdd={addExpense} onDelete={deleteExpense}
         isAdmin={isAdmin} netProfit={netProfit} totalProfit={totalProfit}/>;
       case 'reports':  return <ReportsPage businessInfo={businessInfo}/>;
@@ -470,7 +516,7 @@ function AgrovetApp() {
                             fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
                 <Icon name="warning" size={13}/> {outOfStock.length} Out of Stock
               </div>}
-            <button onClick={loadAll} title="Refresh data"
+            <button onClick={() => loadAll(currentUser)} title="Refresh data"
                     style={{ background:'#f5f5f5', border:'none', borderRadius:8, padding:'6px 10px',
                              cursor:'pointer', color:'#666', fontSize:12, display:'flex', alignItems:'center', gap:5 }}>
               🔄 Refresh
@@ -1403,7 +1449,7 @@ function InventoryPage({ inventory, categories, isAdmin, onUpdate, onAdd, onDele
 // ============================================================
 // SALES PAGE
 // ============================================================
-function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, currentUser, setModal, showNotif }) {
+function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, currentUser, setModal, showNotif, isAdmin }) {
   const isMobile = useIsMobile();
   const [cartItems,   setCartItems]   = useState([]);
   const [searchItem,  setSearchItem]  = useState('');
@@ -1454,257 +1500,59 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
 
   const filteredSales = sales.filter(s => !dateFilter || s.date===dateFilter);
 
-  // ── Receipt view ──────────────────────────────────────────────
-  // Mobile: styled card matching reference image (dark header, scalloped edge, clean body)
-  // Desktop: original compact monospace layout, unchanged
-  // Print: only .receipt-printable is visible when printing
   if (viewReceipt) return (
-    <>
-      {/* ── Print stylesheet injected inline so no separate CSS file is needed ── */}
-      <style>{`
-        @media print {
-          body * { visibility: hidden !important; }
-          .receipt-printable, .receipt-printable * { visibility: visible !important; }
-          .receipt-printable {
-            position: fixed !important;
-            inset: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 24px !important;
-            box-shadow: none !important;
-            border-radius: 0 !important;
-          }
-          /* Hide buttons when printing */
-          .receipt-no-print { display: none !important; }
-        }
-
-        /* ── Scalloped / zigzag bottom edge on the dark header ── */
-        .receipt-header-scallop {
-          position: relative;
-          background: #1a3a2a;
-          padding: 28px 20px 36px;
-          text-align: center;
-          border-radius: 14px 14px 0 0;
-        }
-        .receipt-header-scallop::after {
-          content: '';
-          position: absolute;
-          bottom: -1px;
-          left: 0;
-          right: 0;
-          height: 20px;
-          background: radial-gradient(circle at 10px -1px, transparent 12px, #fff 13px);
-          background-size: 20px 20px;
-          background-repeat: repeat-x;
-        }
-
-        /* ── Mobile-only receipt card styles ── */
-        @media (max-width: 768px) {
-          .receipt-card-mobile {
-            background: #fff;
-            border-radius: 14px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
-            overflow: hidden;
-            font-family: 'Segoe UI', sans-serif;
-          }
-          .receipt-meta-mobile {
-            padding: 18px 20px 10px;
-            text-align: center;
-            font-size: 13px;
-            color: #333;
-            line-height: 1.7;
-          }
-          .receipt-body-mobile {
-            padding: 6px 18px 14px;
-          }
-          .receipt-thankyou-mobile {
-            background: #e8f5e9;
-            padding: 11px 16px;
-            text-align: center;
-            font-size: 13px;
-            font-weight: 600;
-            color: #2e7d32;
-            letter-spacing: 0.3px;
-          }
-        }
-
-        /* ── Desktop: keep original monospace look ── */
-        @media (min-width: 769px) {
-          .receipt-card-desktop {
-            background: #fff;
-            border-radius: 12px;
-            padding: 20px 14px;
-            box-shadow: 0 2px 20px rgba(0,0,0,0.1);
-            font-family: monospace;
-            font-size: 12px;
-          }
-        }
-      `}</style>
-
-      {/* ── Outer wrapper ── */}
-      <div className="receipt-printable" style={{ maxWidth: isMobile ? '100%' : 480, margin:'0 auto' }}>
-
-        {/* ════════════════════════════════
-            MOBILE LAYOUT
-            ════════════════════════════════ */}
-        {isMobile && (
-          <div className="receipt-card-mobile">
-
-            {/* Dark green header with sprout icon */}
-            <div className="receipt-header-scallop">
-              {/* Sprout icon — inline SVG matching reference */}
-              <div style={{ marginBottom:8 }}>
-                <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="18" cy="18" r="18" fill="#2e7d32"/>
-                  <path d="M18 26V16" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
-                  <path d="M18 20 C18 20 13 18 13 13 C13 13 18 13 18 20Z" fill="#fff"/>
-                  <path d="M18 18 C18 18 23 16 23 11 C23 11 18 11 18 18Z" fill="#a5d6a7"/>
-                </svg>
-              </div>
-              <div style={{ color:'#fff', fontSize:18, fontWeight:800, letterSpacing:'1px', marginBottom:2 }}>
-                MACY'S AGROFEEDS
-              </div>
-              <div style={{ color:'#81c784', fontSize:12, fontWeight:400 }}>
-                Machakos, Kenya
-              </div>
-            </div>
-
-            {/* Meta: date, receipt number, cashier */}
-            <div className="receipt-meta-mobile">
-              <div>Date: {viewReceipt.date} &nbsp; {viewReceipt.time}</div>
-              <div>Receipt: {viewReceipt.receipt_number}</div>
-              <div>Cashier: {viewReceipt.cashier || currentUser.name}</div>
-            </div>
-
-            {/* Items table */}
-            <div className="receipt-body-mobile">
-              <div style={{ borderTop:'1px dashed #ccc', marginBottom:10 }}/>
-              <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
-                <colgroup>
-                  <col style={{ width:'62%' }}/>
-                  <col style={{ width:'38%' }}/>
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign:'left', fontSize:11, fontWeight:700, color:'#555',
-                                 letterSpacing:'0.8px', paddingBottom:8 }}>ITEM</th>
-                    <th style={{ textAlign:'right', fontSize:11, fontWeight:700, color:'#555',
-                                 letterSpacing:'0.8px', paddingBottom:8 }}>TOTAL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(viewReceipt.items||[]).map((it,i)=>(
-                    <tr key={i} style={{ borderBottom:'1px solid #f0f0f0' }}>
-                      <td style={{ padding:'10px 6px 10px 0', verticalAlign:'top' }}>
-                        {/* Item name — bold, dark */}
-                        <div style={{ fontWeight:700, color:'#111', fontSize:13, wordBreak:'break-word' }}>
-                          {it.name}
-                        </div>
-                        {/* Qty × unit price — muted, smaller */}
-                        <div style={{ fontSize:11, color:'#888', marginTop:3 }}>
-                          {it.quantity} &times; {fmt(it.unit_price)}
-                        </div>
-                      </td>
-                      <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:700,
-                                   fontSize:13, paddingTop:10, color:'#111', wordBreak:'break-word' }}>
-                        {fmt(it.total)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Grand total row */}
-              <div style={{ borderTop:'1.5px dashed #bbb', marginTop:10, paddingTop:12,
-                            display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ fontWeight:800, fontSize:15, color:'#111', letterSpacing:'0.5px' }}>TOTAL</span>
-                <span style={{ fontWeight:800, fontSize:18, color:'#111' }}>{fmt(viewReceipt.total)}</span>
-              </div>
-            </div>
-
-            {/* Thank-you footer with diamond decorators */}
-            <div className="receipt-thankyou-mobile">
-              ✦ Thank you for shopping! ✦
-            </div>
-
-            {/* ── Buttons — NOT modified, exact same handlers & styles as original ── */}
-            <div className="receipt-no-print" style={{ display:'flex', gap:8, padding:'14px 18px' }}>
-              <button onClick={()=>window.print()}
-                      style={{ flex:1, padding:'9px', background:'#1a3a2a', color:'#fff', border:'none',
-                               borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
-              <button onClick={()=>setViewReceipt(null)}
-                      style={{ flex:1, padding:'9px', background:'#f5f5f5', color:'#555', border:'none',
-                               borderRadius:8, cursor:'pointer', fontSize:13 }}>Close</button>
-            </div>
+    <div style={{ maxWidth:480, margin:'0 auto' }}>
+      <div style={{ background:'#fff', borderRadius:12, padding:28, boxShadow:'0 2px 20px rgba(0,0,0,0.1)',
+                    fontFamily:'monospace', fontSize:13 }}>
+        <div style={{ textAlign:'center', marginBottom:14 }}>
+          <div style={{ fontSize:16, fontWeight:800 }}>🌱 MACY'S AGROFEEDS</div>
+          <div style={{ color:'#666' }}>Machakos, Kenya</div>
+          <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
+          <div>Date: {viewReceipt.date}  {viewReceipt.time}</div>
+          <div>Receipt: {viewReceipt.receipt_number}</div>
+          <div>Cashier: {viewReceipt.cashier || currentUser.name}</div>
+          <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
+        </div>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+          <thead><tr style={{ borderBottom:'1px dashed #ccc' }}>
+            <th style={{ textAlign:'left', padding:'4px 0' }}>Item</th>
+            <th style={{ textAlign:'right' }}>Qty</th>
+            <th style={{ textAlign:'right' }}>Price</th>
+            <th style={{ textAlign:'right' }}>Total</th>
+          </tr></thead>
+          <tbody>
+            {(viewReceipt.items||[]).map((it,i)=>(
+              <tr key={i} style={{ borderBottom:'1px dotted #eee' }}>
+                <td style={{ padding:'4px 0' }}>{it.name}</td>
+                <td style={{ textAlign:'right' }}>{it.quantity}</td>
+                <td style={{ textAlign:'right' }}>{fmt(it.unit_price)}</td>
+                <td style={{ textAlign:'right' }}>{fmt(it.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:10 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800, fontSize:15 }}>
+            <span>TOTAL</span><span>{fmt(viewReceipt.total)}</span>
           </div>
-        )}
-
-        {/* ════════════════════════════════
-            DESKTOP LAYOUT — unchanged
-            ════════════════════════════════ */}
-        {!isMobile && (
-          <div className="receipt-card-desktop">
-            <div style={{ textAlign:'center', marginBottom:14 }}>
-              <div style={{ fontSize:15, fontWeight:800 }}>🌱 MACY'S AGROFEEDS</div>
-              <div style={{ color:'#666', fontSize:11 }}>Machakos, Kenya</div>
-              <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
-              <div style={{ fontSize:11 }}>Date: {viewReceipt.date}  {viewReceipt.time}</div>
-              <div style={{ fontSize:11 }}>Receipt: {viewReceipt.receipt_number}</div>
-              <div style={{ fontSize:11 }}>Cashier: {viewReceipt.cashier || currentUser.name}</div>
-              <div style={{ borderTop:'1px dashed #ccc', margin:'8px 0' }}/>
-            </div>
-            <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
-              <colgroup>
-                <col style={{ width:'68%' }}/>
-                <col style={{ width:'32%' }}/>
-              </colgroup>
-              <thead><tr style={{ borderBottom:'1px dashed #aaa' }}>
-                <th style={{ textAlign:'left', padding:'4px 4px 4px 0', fontSize:10, letterSpacing:'0.5px' }}>ITEM</th>
-                <th style={{ textAlign:'right', padding:'4px 0', fontSize:10, letterSpacing:'0.5px' }}>TOTAL</th>
-              </tr></thead>
-              <tbody>
-                {(viewReceipt.items||[]).map((it,i)=>(
-                  <tr key={i} style={{ borderBottom:'1px dotted #ddd' }}>
-                    <td style={{ padding:'5px 4px 5px 0', verticalAlign:'top' }}>
-                      <div style={{ fontWeight:600, color:'#111', fontSize:11, wordBreak:'break-word' }}>{it.name}</div>
-                      <div style={{ fontSize:10, color:'#888', marginTop:1 }}>
-                        {it.quantity} &times; {fmt(it.unit_price)}
-                      </div>
-                    </td>
-                    <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:600, fontSize:11, paddingTop:5, wordBreak:'break-word' }}>
-                      {fmt(it.total)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:10 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', fontWeight:800, fontSize:15 }}>
-                <span>TOTAL</span><span>{fmt(viewReceipt.total)}</span>
-              </div>
-            </div>
-            <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:8,
-                          textAlign:'center', color:'#666', fontSize:11 }}>Thank you for shopping!</div>
-            {/* ── Buttons — NOT modified ── */}
-            <div className="receipt-no-print" style={{ display:'flex', gap:8, marginTop:16 }}>
-              <button onClick={()=>window.print()}
-                      style={{ flex:1, padding:'9px', background:'#1a3a2a', color:'#fff', border:'none',
-                               borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
-              <button onClick={()=>setViewReceipt(null)}
-                      style={{ flex:1, padding:'9px', background:'#f5f5f5', color:'#555', border:'none',
-                               borderRadius:8, cursor:'pointer', fontSize:13 }}>Close</button>
-            </div>
-          </div>
-        )}
-
+        </div>
+        <div style={{ borderTop:'1px dashed #ccc', marginTop:10, paddingTop:8,
+                      textAlign:'center', color:'#666', fontSize:11 }}>Thank you for shopping!</div>
+        <div style={{ display:'flex', gap:8, marginTop:16 }}>
+          <button onClick={()=>window.print()}
+                  style={{ flex:1, padding:'9px', background:'#1a3a2a', color:'#fff', border:'none',
+                           borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
+          <button onClick={()=>setViewReceipt(null)}
+                  style={{ flex:1, padding:'9px', background:'#f5f5f5', color:'#555', border:'none',
+                           borderRadius:8, cursor:'pointer', fontSize:13 }}>Close</button>
+        </div>
       </div>
-    </>
+    </div>
   );
 
   return (
-    <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 340px', gap: isMobile ? 12 : 20, alignItems:'start' }}>
-      <div>
+    <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : (isAdmin ? '1fr 340px' : '1fr'), gap: isMobile ? 12 : 20, alignItems:'start' }}>
+      {isAdmin && <div>
         {dateFilter && (() => {
           const ds = sales.filter(s => s.date === dateFilter);
           const dr = ds.reduce((a,s) => a + s.total_amount, 0);
@@ -1893,9 +1741,28 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
           )}
         </div>
       </div>
+      }
 
       {/* Cart */}
       <div>
+        {/* Attendant: show simple today summary above cart */}
+        {!isAdmin && (() => {
+          const todayRev = sales.reduce((a,s) => a + s.total_amount, 0);
+          const todayPft = sales.reduce((a,s) => a + s.total_profit, 0);
+          return sales.length > 0 ? (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:12 }}>
+              {[["Today's Revenue", fmt(todayRev), '#e3f2fd', '#1565c0'],
+                ["Today's Profit",  fmt(todayPft), '#e8f5e9', '#2e7d32'],
+                ["Sales Today",     sales.length,  '#f3e5f5', '#6a1b9a'],
+              ].map(([l,v,bg,cc]) => (
+                <div key={l} style={{ background:bg, borderRadius:10, padding:'10px 8px' }}>
+                  <div style={{ fontSize:10, color:'#666', lineHeight:1.3, marginBottom:4 }}>{l}</div>
+                  <div style={{ fontWeight:800, color:cc, fontSize:15 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          ) : null;
+        })()}
         <div style={{ background:'#fff', borderRadius:12, padding: isMobile ? 14 : 20,
                       boxShadow:'0 1px 8px rgba(0,0,0,0.06)', position: isMobile ? 'static' : 'sticky',
                       top:80, width:'100%', boxSizing:'border-box', overflowX:'hidden' }}>
