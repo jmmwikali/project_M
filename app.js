@@ -314,9 +314,9 @@ function AgrovetApp() {
   // ── Derived values ────────────────────────────────────────
   const lowStockItems  = inventory.filter(i => i.quantity <= i.min_stock_level);
   const outOfStock     = inventory.filter(i => i.quantity === 0);
-  const totalRevenue   = sales.reduce((a,s) => a + s.total_amount, 0);
-  const totalProfit    = sales.reduce((a,s) => a + s.total_profit, 0);
-  const totalExpenses  = expenses.reduce((a,e) => a + e.amount, 0);
+  const totalRevenue   = sales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
+  const totalProfit    = sales.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
+  const totalExpenses  = expenses.reduce((a,e) => a + parseFloat(e.amount||0), 0);
   const netProfit      = totalProfit - totalExpenses;
   const isAdmin        = currentUser?.role === 'admin';
   const isMobile      = useIsMobile();
@@ -532,9 +532,9 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
 
   const overdueDays  = alertDays;
   const warnDays     = Math.max(1, alertDays - 1);
-  const totalOwed    = debts.filter(d=>!d.cleared).reduce((a,d)=>a+d.total_cost, 0);
+  const totalOwed    = debts.filter(d=>!d.cleared).reduce((a,d)=>a+parseFloat(d.total_cost||0), 0);
   const overdueCount = debts.filter(d=>!d.cleared && d.days_outstanding>=overdueDays).length;
-  const unitPrice    = selItem ? selItem.selling_price : 0;
+  const unitPrice    = selItem ? parseFloat(selItem.selling_price||0) : 0;
   const totalCost    = parseFloat(form.quantity||0) * unitPrice;
 
   const available = inventory.filter(i =>
@@ -843,14 +843,14 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
                      totalRevenue, totalProfit, netProfit, businessInfo, setActiveTab }) {
   const isMobile = useIsMobile();                    
   const todaySales   = sales.filter(s => s.date === today());
-  const todayRevenue = todaySales.reduce((a,s) => a + s.total_amount, 0);
-  const todayProfit  = todaySales.reduce((a,s) => a + s.total_profit, 0);
-  const totalItems   = inventory.reduce((a,i) => a + i.quantity, 0);
-  const totalExp     = expenses.reduce((a,e) => a + e.amount, 0);
+  const todayRevenue = todaySales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
+  const todayProfit  = todaySales.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
+  const totalItems   = inventory.reduce((a,i) => a + parseFloat(i.quantity||0), 0);
+  const totalExp     = expenses.reduce((a,e) => a + parseFloat(e.amount||0), 0);
 
   const itemSoldMap = {};
   sales.forEach(s => (s.items||[]).forEach(si => {
-    itemSoldMap[si.name] = (itemSoldMap[si.name]||0) + si.quantity;
+    itemSoldMap[si.name] = (itemSoldMap[si.name]||0) + parseFloat(si.quantity||0);
   }));
   const topItems = Object.entries(itemSoldMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
@@ -1287,8 +1287,8 @@ function InventoryPage({ inventory, categories, isAdmin, onUpdate, onAdd, onDele
           <tbody>
             {filtered.map((item,idx) => {
               const st = badge(item);
-              const profit = item.selling_price - item.cost_price;
-              const margin = item.selling_price>0 ? ((profit/item.selling_price)*100).toFixed(1) : 0;
+              const profit = parseFloat(item.selling_price||0) - parseFloat(item.cost_price||0);
+              const margin = parseFloat(item.selling_price||0)>0 ? ((profit/parseFloat(item.selling_price))*100).toFixed(1) : 0;
               return editItem?.id===item.id ? (
                 <tr key={item.id} style={{ background:'#f0f7f0' }}>
                   <td colSpan={9} style={{ padding:14 }}>
@@ -1385,9 +1385,9 @@ function InventoryPage({ inventory, categories, isAdmin, onUpdate, onAdd, onDele
 
       {/* Value summary */}
       <div style={{ marginTop:16, display:'flex', gap:12, flexWrap:'wrap' }}>
-        {[['Stock Value (Cost)',   inventory.reduce((a,i)=>a+i.cost_price*i.quantity,0),     '#666'],
-          ['Stock Value (Retail)', inventory.reduce((a,i)=>a+i.selling_price*i.quantity,0),  '#1565c0'],
-          ['Potential Profit',     inventory.reduce((a,i)=>a+(i.selling_price-i.cost_price)*i.quantity,0), '#2e7d32'],
+        {[['Stock Value (Cost)',   inventory.reduce((a,i)=>a+parseFloat(i.cost_price||0)*parseFloat(i.quantity||0),0),     '#666'],
+          ['Stock Value (Retail)', inventory.reduce((a,i)=>a+parseFloat(i.selling_price||0)*parseFloat(i.quantity||0),0),  '#1565c0'],
+          ['Potential Profit',     inventory.reduce((a,i)=>a+(parseFloat(i.selling_price||0)-parseFloat(i.cost_price||0))*parseFloat(i.quantity||0),0), '#2e7d32'],
         ].map(([l,v,c])=>(
           <div key={l} style={{ background:'#fff', borderRadius:10, padding:'12px 18px',
                                 boxShadow:'0 1px 6px rgba(0,0,0,0.05)', fontSize:13 }}>
@@ -1412,7 +1412,7 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
   const [completing,  setCompleting]  = useState(false);
 
   const available = inventory.filter(i =>
-    i.quantity>0 && i.name.toLowerCase().includes(searchItem.toLowerCase())
+    parseFloat(i.quantity||0)>0 && i.name.toLowerCase().includes(searchItem.toLowerCase())
   );
 
   const addToCart = (item) => {
@@ -1420,7 +1420,7 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
       const ex = prev.find(c=>c.item_id===item.id);
       if (ex) return prev.map(c=>c.item_id===item.id ? {...c,quantity:c.quantity+1} : c);
       return [...prev, { item_id:item.id, name:item.name, quantity:1,
-                         price:item.selling_price, cost:item.cost_price, max_qty:item.quantity }];
+                         price:parseFloat(item.selling_price||0), cost:parseFloat(item.cost_price||0), max_qty:parseFloat(item.quantity||0) }];
     });
     setSearchItem('');
   };
@@ -1707,8 +1707,8 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
       <div>
         {dateFilter && (() => {
           const ds = sales.filter(s => s.date === dateFilter);
-          const dr = ds.reduce((a,s) => a + s.total_amount, 0);
-          const dp = ds.reduce((a,s) => a + s.total_profit, 0);
+          const dr = ds.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
+          const dp = ds.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
           return (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap: isMobile ? 8 : 12, marginBottom: isMobile ? 10 : 14 }}>
               {[["That Day's Revenue", fmt(dr), '#e3f2fd', '#1565c0'],
@@ -1764,8 +1764,8 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
           </div>
           {(() => {
             const ts = sales.filter(s=>s.date===today());
-            const tr = ts.reduce((a,s)=>a+s.total_amount,0);
-            const tp = ts.reduce((a,s)=>a+s.total_profit,0);
+            const tr = ts.reduce((a,s)=>a+parseFloat(s.total_amount||0),0);
+            const tp = ts.reduce((a,s)=>a+parseFloat(s.total_profit||0),0);
             return ts.length>0 ? (
               <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:14 }}>
                 {[["Today's Revenue",fmt(tr),'#e3f2fd','#1565c0'],
@@ -1991,12 +1991,12 @@ function ExpensesPage({ expenses, onAdd, onDelete, isAdmin, netProfit, totalProf
   const [form,     setForm]     = useState({ date:today(), description:'', amount:'' });
   const [showForm, setShowForm] = useState(false);
   const [saving,   setSaving]   = useState(false);
-  const totalExp = expenses.reduce((a,e)=>a+e.amount,0);
+  const totalExp = expenses.reduce((a,e)=>a+parseFloat(e.amount||0),0);
 
   const monthlyExp = {};
   expenses.forEach(e => {
     const m = e.date.substring(0,7);
-    monthlyExp[m] = (monthlyExp[m]||0) + e.amount;
+    monthlyExp[m] = (monthlyExp[m]||0) + parseFloat(e.amount||0);
   });
 
   return (
