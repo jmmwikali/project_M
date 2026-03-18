@@ -1580,10 +1580,10 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
             {/* Items table */}
             <div className="receipt-body-mobile">
               <div style={{ borderTop:'1px dashed #ccc', marginBottom:10 }}/>
-              <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'auto' }}>
                 <colgroup>
-                  <col style={{ width:'55%' }}/>
-                  <col style={{ width:'45%' }}/>
+                  <col style={{ width:'62%' }}/>
+                  <col style={{ width:'38%' }}/>
                 </colgroup>
                 <thead>
                   <tr>
@@ -1602,12 +1602,12 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
                           {it.name}
                         </div>
                         {/* Qty × unit price — muted, smaller */}
-                        <div style={{ fontSize:10, color:'#888', marginTop:3 }}>
+                        <div style={{ fontSize:11, color:'#888', marginTop:3 }}>
                           {it.quantity} &times; {fmt(it.unit_price)}
                         </div>
                       </td>
                       <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:700,
-                                   fontSize:12, paddingTop:10, color:'#111', whiteSpace:'nowrap' }}>
+                                   fontSize:13, paddingTop:10, color:'#111', wordBreak:'break-word' }}>
                         {fmt(it.total)}
                       </td>
                     </tr>
