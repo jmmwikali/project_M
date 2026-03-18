@@ -1408,7 +1408,7 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
   const [cartItems,   setCartItems]   = useState([]);
   const [searchItem,  setSearchItem]  = useState('');
   const [viewReceipt, setViewReceipt] = useState(null);
-  const [dateFilter,  setDateFilter]  = useState('');
+  const [dateFilter,  setDateFilter]  = useState(today());
   const [completing,  setCompleting]  = useState(false);
 
   const available = inventory.filter(i =>
