@@ -522,8 +522,6 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                      showNotif, isMobile, alertDays, onSaveSettings }) {
   const [showForm,     setShowForm]     = useState(false);
   const [saving,       setSaving]       = useState(false);
-  const [itemSearch,   setItemSearch]   = useState('');
-  const [selItem,      setSelItem]      = useState(null);
   const [editingDays,  setEditingDays]  = useState(false);
   const [draftDays,    setDraftDays]    = useState(String(alertDays));
   const [form, setForm] = useState({
@@ -695,7 +693,7 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                             minWidth: isMobile?520:'auto' }}>
               <thead>
                 <tr style={{ background:'#f5f5f5' }}>
-                  {['Person','Item','Qty','Unit Price','Total','Date','Days','Status',''].map(h=>(
+                  {['Person','Total','Date','Days','Status',''].map(h=>(
                     <th key={h} style={{ padding: isMobile?'7px 8px':'9px 12px', textAlign:'left',
                                          fontWeight:700, color:'#444', fontSize: isMobile?10:12, whiteSpace:'nowrap' }}>{h}</th>
                   ))}
@@ -707,9 +705,6 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                   return (
                     <tr key={d.id} style={{ borderBottom:'1px solid #f0f0f0', background: rowBg(d) }}>
                       <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:600, color: rowText(d) }}>{d.person_name}</td>
-                      <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.item_name}</td>
-                      <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{d.quantity}</td>
-                      <td style={{ padding: isMobile?'8px':'10px 12px', color: rowText(d) }}>{fmt(d.unit_price)}</td>
                       <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700, color: d.cleared?'#aaa':'#1a3a2a' }}>{fmt(d.total_cost)}</td>
                       <td style={{ padding: isMobile?'8px':'10px 12px', color:'#888', whiteSpace:'nowrap' }}>{d.date_added}</td>
                       <td style={{ padding: isMobile?'8px':'10px 12px', fontWeight:700, color: rowText(d) }}>
