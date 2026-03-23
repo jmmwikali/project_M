@@ -1,4 +1,4 @@
-const CACHE = 'agrofeeds-v13.1';
+const CACHE = 'agrofeeds-v13.2';
 const ASSETS = [
   '/project_M/',
   '/project_M/index.html',
