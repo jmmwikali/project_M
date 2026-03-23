@@ -527,23 +527,13 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
   const [editingDays,  setEditingDays]  = useState(false);
   const [draftDays,    setDraftDays]    = useState(String(alertDays));
   const [form, setForm] = useState({
-    person_name:'', quantity:'', date_added:today(), notes:''
+    person_name:'', total_cost:'', date_added:today(), notes:''
   });
 
   const overdueDays  = alertDays;
   const warnDays     = Math.max(1, alertDays - 1);
   const totalOwed    = debts.filter(d=>!d.cleared).reduce((a,d)=>a+parseFloat(d.total_cost||0), 0);
   const overdueCount = debts.filter(d=>!d.cleared && d.days_outstanding>=overdueDays).length;
-  const unitPrice    = selItem ? parseFloat(selItem.selling_price||0) : 0;
-  const totalCost    = parseFloat(form.quantity||0) * unitPrice;
-
-  const available = inventory.filter(i =>
-    i.quantity > 0 &&
-    itemSearch.length > 0 &&
-    i.name.toLowerCase().includes(itemSearch.toLowerCase())
-  ).slice(0, 8);
-
-  const selectItem = (item) => { setSelItem(item); setItemSearch(item.name); };
 
   const rowBg = (d) => {
     if (d.cleared) return '#f9f9f9';
@@ -565,21 +555,17 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
   };
 
   const resetForm = () => {
-    setForm({ person_name:'', quantity:'', date_added:today(), notes:'' });
-    setItemSearch(''); setSelItem(null);
+    setForm({ person_name:'', total_cost:'', date_added:today(), notes:'' });
   };
 
   const handleSave = async () => {
     if (!form.person_name.trim()) { showNotif('Enter person name', 'error'); return; }
-    if (!selItem)                  { showNotif('Select an item from inventory', 'error'); return; }
-    if (!form.quantity || parseFloat(form.quantity)<=0) { showNotif('Enter a valid quantity', 'error'); return; }
+    if (!form.total_cost || parseFloat(form.total_cost)<=0) { showNotif('Enter a valid total cost', 'error'); return; }
     setSaving(true);
     try {
       await onAdd({
         person_name: form.person_name.trim(),
-        item_name:   selItem.name,
-        quantity:    parseFloat(form.quantity),
-        unit_price:  selItem.selling_price,
+        total_cost:  parseFloat(form.total_cost),
         date_added:  form.date_added,
         notes:       form.notes,
       });
@@ -663,61 +649,15 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                      style={{ width:'100%', padding:'9px 12px', borderRadius:8,
                               border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
             </div>
-            <div style={{ position:'relative' }}>
-              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>
-                Item * {selItem && <span style={{ color:'#4caf50', fontSize:10, fontWeight:700 }}>✓ {fmt(selItem.selling_price)} each</span>}
-              </label>
-              <input type="text" value={itemSearch}
-                     onChange={e=>{ setItemSearch(e.target.value); setSelItem(null); }}
-                     placeholder="Search product…"
-                     style={{ width:'100%', padding:'9px 12px', borderRadius:8,
-                              border: selItem?'1.5px solid #4caf50':'1.5px solid #ddd',
-                              fontSize:13, boxSizing:'border-box', background: selItem?'#f1f8e9':'#fff' }}/>
-              {itemSearch && !selItem && (
-                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff',
-                              borderRadius:8, boxShadow:'0 4px 20px rgba(0,0,0,0.12)', zIndex:300,
-                              maxHeight:220, overflowY:'auto', border:'1px solid #eee' }}>
-                  {available.length===0
-                    ? <div style={{ padding:12, color:'#aaa', fontSize:12 }}>No items found</div>
-                    : available.map(i=>(
-                      <div key={i.id} onClick={()=>selectItem(i)}
-                           style={{ padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f5f5f5', fontSize:13 }}
-                           onMouseEnter={e=>e.currentTarget.style.background='#f5f5f5'}
-                           onMouseLeave={e=>e.currentTarget.style.background=''}>
-                        <div style={{ fontWeight:600, color:'#222' }}>{i.name}</div>
-                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#888' }}>
-                          <span>{i.category}</span>
-                          <span style={{ color:'#2e7d32', fontWeight:600 }}>{fmt(i.selling_price)} | {i.quantity} left</span>
-                        </div>
-                      </div>
-                    ))
-                  }
-                </div>
-              )}
-            </div>
-          </div>
-          <div style={{ display:'grid', gridTemplateColumns: isMobile?'1fr 1fr':'1fr 1fr 1fr 1fr', gap:10, marginBottom:10 }}>
             <div>
-              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Quantity *</label>
-              <input type="number" step="0.25" min="0.25" value={form.quantity} placeholder="0"
-                     onChange={e=>setForm(p=>({...p,quantity:e.target.value}))}
+              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Total Cost (KES) *</label>
+              <input type="number" step="0.01" min="0.01" value={form.total_cost} placeholder="0.00"
+                     onChange={e=>setForm(p=>({...p,total_cost:e.target.value}))}
                      style={{ width:'100%', padding:'9px 12px', borderRadius:8,
                               border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
             </div>
-            <div>
-              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Unit Price</label>
-              <div style={{ padding:'9px 12px', borderRadius:8, border:'1.5px solid #e8f5e9',
-                            fontSize:13, background:'#f1f8e9', fontWeight:700, color: selItem?'#2e7d32':'#bbb' }}>
-                {selItem ? fmt(unitPrice) : '—'}
-              </div>
-            </div>
-            <div>
-              <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Total Cost</label>
-              <div style={{ padding:'9px 12px', borderRadius:8, border:'1.5px solid #e0e0e0',
-                            fontSize:13, background:'#f5f5f5', fontWeight:800, color: totalCost>0?'#1a3a2a':'#bbb' }}>
-                {totalCost>0 ? fmt(totalCost) : '—'}
-              </div>
-            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns: isMobile?'1fr':'1fr 1fr', gap:10, marginBottom:10 }}>
             <div>
               <label style={{ fontSize:11, fontWeight:600, color:'#555', display:'block', marginBottom:3 }}>Date</label>
               <input type="date" value={form.date_added}
