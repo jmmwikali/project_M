@@ -164,6 +164,7 @@ function AgrovetApp() {
   const [inventory,   setInventory]   = useState([]);
   const [sales,       setSales]       = useState([]);
   const [expenses,    setExpenses]    = useState([]);
+  const [restockExpenses, setRestockExpenses] = useState([]);
   const [users,       setUsers]       = useState([]);
   const [debts,       setDebts]       = useState([]);
   const [settings,    setSettings]    = useState({ debt_alert_days: '3' });
@@ -200,7 +201,10 @@ function AgrovetApp() {
       ]);
       setInventory(inv.items || []);
       setSales(sal.sales || []);
-      setExpenses(exp.expenses || []);
+      // Split expenses by type
+      const allExp = exp.expenses || [];
+      setExpenses(allExp.filter(e => e.expense_type === 'personal' || !e.expense_type));
+      setRestockExpenses(allExp.filter(e => e.expense_type === 'restock'));
       setUsers(usr.users || []);
       setCategories((cats.categories || []).map(c => c.name));
       const [dbt, sett] = await Promise.all([api('/api/debts'), api('/api/settings')]);
@@ -218,7 +222,7 @@ function AgrovetApp() {
   const handleLogout = async () => {
     await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setCurrentUser(null);
-    setInventory([]); setSales([]); setExpenses([]); setUsers([]);
+    setInventory([]); setSales([]); setExpenses([]); setRestockExpenses([]); setUsers([]);
   };
 
   // ── Inventory actions ─────────────────────────────────────
@@ -301,25 +305,36 @@ function AgrovetApp() {
   // ── Expense actions ───────────────────────────────────────
   const addExpense = async (exp) => {
     const data = await api('/api/expenses', { method:'POST', body: exp });
-    setExpenses(prev => [data.expense, ...prev]);
+    if (data.expense.expense_type === 'restock') {
+      setRestockExpenses(prev => [data.expense, ...prev]);
+    } else {
+      setExpenses(prev => [data.expense, ...prev]);
+    }
     showNotif('Expense added.');
   };
 
-  const deleteExpense = async (id) => {
+  const deleteExpense = async (id, expense_type) => {
     await api(`/api/expenses/${id}`, { method:'DELETE' });
-    setExpenses(prev => prev.filter(e => e.id !== id));
+    if (expense_type === 'restock') {
+      setRestockExpenses(prev => prev.filter(e => e.id !== id));
+    } else {
+      setExpenses(prev => prev.filter(e => e.id !== id));
+    }
     showNotif('Expense deleted.');
   };
 
   // ── Derived values ────────────────────────────────────────
-  const lowStockItems  = inventory.filter(i => i.quantity <= i.min_stock_level);
-  const outOfStock     = inventory.filter(i => i.quantity === 0);
-  const totalRevenue   = sales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
-  const totalProfit    = sales.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
-  const totalExpenses  = expenses.reduce((a,e) => a + parseFloat(e.amount||0), 0);
-  const netProfit      = totalProfit - totalExpenses;
-  const isAdmin        = currentUser?.role === 'admin';
-  const isMobile      = useIsMobile();
+  const lowStockItems        = inventory.filter(i => i.quantity <= i.min_stock_level);
+  const outOfStock           = inventory.filter(i => i.quantity === 0);
+  const totalRevenue         = sales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
+  const totalProfit          = sales.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
+  const totalPersonalExpenses = expenses.reduce((a,e) => a + parseFloat(e.amount||0), 0);
+  const totalRestockExpenses  = restockExpenses.reduce((a,e) => a + parseFloat(e.amount||0), 0);
+  const totalExpenses        = totalPersonalExpenses + totalRestockExpenses;
+  const netProfit            = totalProfit - totalPersonalExpenses;   // restock does NOT reduce net profit
+  const revenueAfterRestock  = totalRevenue - totalRestockExpenses;
+  const isAdmin              = currentUser?.role === 'admin';
+  const isMobile             = useIsMobile();
 
   // ── Show login if not authenticated ──────────────────────
   if (!authChecked) {
@@ -350,7 +365,8 @@ function AgrovetApp() {
     switch (activeTab) {
       case 'dashboard': return <Dashboard inventory={inventory} sales={sales} expenses={expenses}
         lowStockItems={lowStockItems} outOfStock={outOfStock} totalRevenue={totalRevenue}
-        totalProfit={totalProfit} netProfit={netProfit} businessInfo={businessInfo} setActiveTab={setActiveTab}
+        totalProfit={totalProfit} netProfit={netProfit} revenueAfterRestock={revenueAfterRestock}
+        totalRestockExpenses={totalRestockExpenses} businessInfo={businessInfo} setActiveTab={setActiveTab}
         debts={debts} onAddDebt={addDebt} onClearDebt={clearDebt} onDeleteDebt={deleteDebt}
         settings={settings} onSaveSettings={saveSettings}
         currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
@@ -359,8 +375,12 @@ function AgrovetApp() {
         onRestock={restock} onAdjust={adjustStock} showNotif={showNotif} setModal={setModal}/>;
       case 'sales':    return <SalesPage inventory={inventory} sales={sales} onAddSale={addSale}
         onDeleteByDate={deleteSalesByDate} onDeleteSale={deleteSale} currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
-      case 'expenses': return <ExpensesPage expenses={expenses} onAdd={addExpense} onDelete={deleteExpense}
-        isAdmin={isAdmin} netProfit={netProfit} totalProfit={totalProfit}/>;
+      case 'expenses': return <ExpensesPage expenses={expenses} restockExpenses={restockExpenses}
+        onAdd={addExpense} onDelete={deleteExpense}
+        isAdmin={isAdmin} netProfit={netProfit} totalProfit={totalProfit}
+        totalRevenue={totalRevenue} revenueAfterRestock={revenueAfterRestock}
+        totalPersonalExpenses={totalPersonalExpenses} totalRestockExpenses={totalRestockExpenses}
+        totalExpenses={totalExpenses}/>;
       case 'reports':  return <ReportsPage businessInfo={businessInfo}/>;
       case 'users':    return <UsersPage users={users} setUsers={setUsers} showNotif={showNotif} currentUser={currentUser} setModal={setModal}/>;
       default: return null;
@@ -775,7 +795,7 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
 // DASHBOARD
 // ============================================================
 function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debts, onAddDebt, onClearDebt, onDeleteDebt, settings, onSaveSettings, currentUser, setModal, showNotif,
-                     totalRevenue, totalProfit, netProfit, businessInfo, setActiveTab }) {
+                     totalRevenue, totalProfit, netProfit, revenueAfterRestock, totalRestockExpenses, businessInfo, setActiveTab }) {
   const isMobile = useIsMobile();                    
   const todaySales   = sales.filter(s => s.date === today());
   const todayRevenue = todaySales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
@@ -810,6 +830,8 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
     <div style={{ maxWidth:'100%', overflowX:'hidden' }}>
       <div style={{ display:'grid', gridTemplateColumns: window.innerWidth < 768 ? '1fr' : 'repeat(auto-fit,minmax(200px,1fr))', gap: window.innerWidth < 768 ? 10 : 16, marginBottom: window.innerWidth < 768 ? 14 : 24 }}>
         <StatCard label="Total Revenue" value={fmt(totalRevenue)} icon="sales" color="#1565c0" sub="All recorded sales"/>
+        <StatCard label="Revenue After Restock" value={fmt(revenueAfterRestock)} icon="restock" color="#00838f"
+                  sub={`Restock costs: ${fmt(totalRestockExpenses)}`}/>
         <StatCard label="Gross Profit" value={fmt(totalProfit)} icon="reports" color="#2e7d32"
                   sub={`Margin: ${totalRevenue ? ((totalProfit/totalRevenue)*100).toFixed(1) : 0}%`}/>
         <StatCard label="Net Profit (After Expenses)" value={fmt(netProfit)} icon="expenses"
@@ -1921,176 +1943,273 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
 // ============================================================
 // EXPENSES PAGE
 // ============================================================
-function ExpensesPage({ expenses, onAdd, onDelete, isAdmin, netProfit, totalProfit }) {
+function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
+                        netProfit, totalProfit, totalRevenue, revenueAfterRestock,
+                        totalPersonalExpenses, totalRestockExpenses, totalExpenses }) {
   const isMobile = useIsMobile();
-  const [form,     setForm]     = useState({ date:today(), description:'', amount:'' });
-  const [showForm, setShowForm] = useState(false);
-  const [saving,   setSaving]   = useState(false);
-  const totalExp = expenses.reduce((a,e)=>a+parseFloat(e.amount||0),0);
 
-  const monthlyExp = {};
+  // ── Shared form state: one form per table ──
+  const emptyForm = { date: today(), description: '', amount: '' };
+  const [personalForm,     setPersonalForm]     = useState(emptyForm);
+  const [restockForm,      setRestockForm]       = useState(emptyForm);
+  const [showPersonalForm, setShowPersonalForm]  = useState(false);
+  const [showRestockForm,  setShowRestockForm]   = useState(false);
+  const [savingPersonal,   setSavingPersonal]    = useState(false);
+  const [savingRestock,    setSavingRestock]     = useState(false);
+
+  // Monthly breakdown for personal expenses
+  const monthlyPersonal = {};
   expenses.forEach(e => {
     const m = e.date.substring(0,7);
-    monthlyExp[m] = (monthlyExp[m]||0) + parseFloat(e.amount||0);
+    monthlyPersonal[m] = (monthlyPersonal[m]||0) + parseFloat(e.amount||0);
   });
+
+  // ── Reusable expense table ──────────────────────────────
+  const ExpenseTable = ({ rows, expenseType }) => (
+    <>
+      {isMobile ? (
+        <div style={{ padding:'0 10px' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'76px 1fr 80px 28px',
+                        gap:4, padding:'8px 0', borderBottom:'2px solid #eee' }}>
+            {['Date','Description','Amount',''].map(h=>(
+              <div key={h} style={{ fontSize:11, fontWeight:700, color:'#444' }}>{h}</div>
+            ))}
+          </div>
+          {rows.length===0
+            ? <div style={{ padding:'16px 0', color:'#aaa', fontSize:13 }}>No entries yet.</div>
+            : rows.map(e=>(
+              <div key={e.id} style={{ display:'grid', gridTemplateColumns:'76px 1fr 80px 28px',
+                                       gap:4, padding:'9px 0', borderBottom:'1px solid #f5f5f5', alignItems:'center' }}>
+                <div style={{ fontSize:11, color:'#666' }}>{e.date.substring(5)}</div>
+                <div style={{ fontSize:11, color:'#333', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.description}</div>
+                <div style={{ fontSize:12, fontWeight:700, color:'#c62828' }}>{fmt(e.amount)}</div>
+                <div>{isAdmin && <button onClick={()=>onDelete(e.id, expenseType)}
+                                         style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350', padding:0 }}>
+                  <Icon name="trash" size={13}/>
+                </button>}</div>
+              </div>
+            ))
+          }
+          <div style={{ display:'grid', gridTemplateColumns:'76px 1fr 80px 28px',
+                        gap:4, padding:'9px 0', borderTop:'2px solid #eee' }}>
+            <div style={{ fontSize:12, fontWeight:700, gridColumn:'1/3' }}>TOTAL</div>
+            <div style={{ fontSize:13, fontWeight:800, color:'#c62828' }}>
+              {fmt(rows.reduce((a,e)=>a+parseFloat(e.amount||0),0))}
+            </div>
+            <div/>
+          </div>
+        </div>
+      ) : (
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <thead><tr style={{ background:'#f5f5f5' }}>
+              {['Date','Description','Amount',''].map(h=>
+                <th key={h} style={{ padding:'10px 14px', textAlign:'left', fontWeight:700, color:'#444', fontSize:12 }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.length===0
+                ? <tr><td colSpan={4} style={{ padding:'16px 14px', color:'#aaa', fontSize:13 }}>No entries yet.</td></tr>
+                : rows.map(e=>(
+                  <tr key={e.id} style={{ borderBottom:'1px solid #f5f5f5' }}>
+                    <td style={{ padding:'11px 14px', color:'#666' }}>{e.date}</td>
+                    <td style={{ padding:'11px 14px', color:'#333' }}>{e.description}</td>
+                    <td style={{ padding:'11px 14px', fontWeight:700, color:'#c62828' }}>{fmt(e.amount)}</td>
+                    <td style={{ padding:'11px 14px' }}>
+                      {isAdmin && <button onClick={()=>onDelete(e.id, expenseType)}
+                                          style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350' }}>
+                        <Icon name="trash" size={14}/>
+                      </button>}
+                    </td>
+                  </tr>
+                ))
+              }
+            </tbody>
+            <tfoot><tr style={{ background:'#f9f9f9', borderTop:'2px solid #eee' }}>
+              <td colSpan={2} style={{ padding:'11px 14px', fontWeight:700, fontSize:13 }}>TOTAL</td>
+              <td style={{ padding:'11px 14px', fontWeight:800, color:'#c62828', fontSize:15 }}>
+                {fmt(rows.reduce((a,e)=>a+parseFloat(e.amount||0),0))}
+              </td>
+              <td/>
+            </tr></tfoot>
+          </table>
+        </div>
+      )}
+    </>
+  );
+
+  // ── Add-expense form (shared layout, parameterised) ──────
+  const AddForm = ({ form, setForm, saving, onSubmit, onCancel }) => (
+    <div style={{ background:'#fff', borderRadius:12, padding:20, marginBottom:16,
+                  boxShadow:'0 1px 8px rgba(0,0,0,0.06)', border:'1px solid #ffccbc' }}>
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr 1fr', gap:12 }}>
+        {[['Date','date','date'],['Description','description','text'],['Amount (KES)','amount','number']].map(([l,f,t])=>(
+          <div key={f}>
+            <label style={{ fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4 }}>{l}</label>
+            <input type={t} value={form[f]} onChange={ev=>setForm(p=>({...p,[f]:ev.target.value}))}
+                   placeholder={f==='amount'?'0.00':''}
+                   style={{ width:'100%', padding:'8px 11px', borderRadius:7,
+                            border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:8, marginTop:12 }}>
+        <button onClick={onCancel}
+                style={{ padding:'9px 16px', border:'1.5px solid #ddd', borderRadius:8,
+                         background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
+        <button disabled={saving} onClick={onSubmit}
+                style={{ padding:'9px 20px', background: saving?'#a5d6a7':'#4caf50',
+                         color:'#fff', border:'none', borderRadius:8,
+                         cursor: saving?'not-allowed':'pointer', fontSize:13, fontWeight:700 }}>
+          {saving?'Saving…':'Save Expense'}
+        </button>
+      </div>
+    </div>
+  );
+
+  const handleAddPersonal = async () => {
+    if (!personalForm.description || !personalForm.amount) return;
+    setSavingPersonal(true);
+    try {
+      await onAdd({ ...personalForm, amount: parseFloat(personalForm.amount), expense_type: 'personal' });
+      setPersonalForm(emptyForm);
+      setShowPersonalForm(false);
+    } catch(e){ alert(e.message); }
+    finally { setSavingPersonal(false); }
+  };
+
+  const handleAddRestock = async () => {
+    if (!restockForm.description || !restockForm.amount) return;
+    setSavingRestock(true);
+    try {
+      await onAdd({ ...restockForm, amount: parseFloat(restockForm.amount), expense_type: 'restock' });
+      setRestockForm(emptyForm);
+      setShowRestockForm(false);
+    } catch(e){ alert(e.message); }
+    finally { setSavingRestock(false); }
+  };
 
   return (
     <div>
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(3,1fr)' : 'repeat(auto-fit,minmax(200px,1fr))', gap: isMobile ? 8 : 16, marginBottom: isMobile ? 12 : 22 }}>
-        {[['Total Expenses', fmt(totalExp),    '#c62828', 'Recorded expenses'],
-          ['Gross Profit',   fmt(totalProfit), '#2e7d32', 'Before expenses'],
-          ['Net Profit',     fmt(netProfit),   netProfit>=0?'#558b2f':'#c62828', 'After expenses'],
+      {/* ── 5 Summary Cards ─────────────────────────────────── */}
+      <div style={{ display:'grid',
+                    gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(auto-fit,minmax(180px,1fr))',
+                    gap: isMobile ? 8 : 16, marginBottom: isMobile ? 12 : 22, flexWrap:'wrap' }}>
+        {[
+          ['Total Expenses',        fmt(totalExpenses),        '#c62828', 'Personal + Restock'],
+          ['Gross Profit',          fmt(totalProfit),          '#2e7d32', 'Before expenses'],
+          ['Net Profit',            fmt(netProfit),            netProfit>=0?'#558b2f':'#c62828', 'Gross − Personal expenses'],
+          ['Total Revenue',         fmt(totalRevenue),         '#1565c0', 'All recorded sales'],
+          ['Revenue After Restock', fmt(revenueAfterRestock),  '#00838f', `Revenue − ${fmt(totalRestockExpenses)} restock`],
         ].map(([l,v,col,s])=>(
-          <div key={l} style={{ background:'#fff', borderRadius:12, padding: isMobile ? '10px 10px' : '18px 22px',
+          <div key={l} style={{ background:'#fff', borderRadius:12,
+                                padding: isMobile ? '10px 10px' : '18px 22px',
                                 boxShadow:'0 1px 8px rgba(0,0,0,0.06)', borderLeft:`4px solid ${col}` }}>
-            <div style={{ fontSize: isMobile ? 9 : 12, color:'#888', fontWeight:600 }}>{l}</div>
-            <div style={{ fontSize: isMobile ? 13 : 22, fontWeight:800, color:col, margin:'4px 0 2px' }}>{v}</div>
+            <div style={{ fontSize: isMobile ? 9 : 11, color:'#888', fontWeight:600 }}>{l}</div>
+            <div style={{ fontSize: isMobile ? 13 : 20, fontWeight:800, color:col, margin:'4px 0 2px' }}>{v}</div>
             <div style={{ fontSize: isMobile ? 9 : 11, color:'#aaa' }}>{s}</div>
           </div>
         ))}
-        {!isMobile && (
-          <div style={{ background:'#fff', borderRadius:12, padding:'18px 22px',
-                        boxShadow:'0 1px 8px rgba(0,0,0,0.06)', borderLeft:'4px solid #1565c0' }}>
-            <div style={{ fontSize:12, color:'#888', fontWeight:600, marginBottom:6 }}>Formula</div>
-            <div style={{ fontFamily:'monospace', fontSize:12, color:'#333', lineHeight:1.8 }}>
-              net = gross − expenses<br/>
-              {fmt(totalProfit)} − {fmt(totalExp)} = <strong style={{ color: netProfit>=0?'#2e7d32':'#c62828' }}>{fmt(netProfit)}</strong>
-            </div>
-          </div>
-        )}
       </div>
 
-      {isMobile && (
-        <div style={{ background:'#fff', borderRadius:12, padding:'14px 16px', marginBottom:12,
+      {/* ── Formula card (desktop only) ───────────────────── */}
+      {!isMobile && (
+        <div style={{ background:'#fff', borderRadius:12, padding:'14px 20px', marginBottom:20,
                       boxShadow:'0 1px 8px rgba(0,0,0,0.06)', borderLeft:'4px solid #1565c0' }}>
-          <div style={{ fontSize:13, fontWeight:700, color:'#1a3a2a', marginBottom:6 }}>Formula</div>
-          <div style={{ fontFamily:'monospace', fontSize:12, color:'#333', lineHeight:1.9 }}>
-            net = gross − expenses<br/>
-            {fmt(totalProfit)} − {fmt(totalExp)} =<br/>
-            <strong style={{ color: netProfit>=0?'#2e7d32':'#c62828', fontSize:14 }}>{fmt(netProfit)}</strong>
+          <div style={{ fontSize:12, color:'#888', fontWeight:600, marginBottom:6 }}>Formulas</div>
+          <div style={{ fontFamily:'monospace', fontSize:12, color:'#333', lineHeight:2 }}>
+            <span style={{ color:'#00838f', fontWeight:700 }}>Revenue After Restock</span> = {fmt(totalRevenue)} − {fmt(totalRestockExpenses)} = <strong style={{ color:'#00838f' }}>{fmt(revenueAfterRestock)}</strong>
+            {'  ·  '}
+            <span style={{ color:'#558b2f', fontWeight:700 }}>Net Profit</span> = {fmt(totalProfit)} − {fmt(totalPersonalExpenses)} = <strong style={{ color: netProfit>=0?'#2e7d32':'#c62828' }}>{fmt(netProfit)}</strong>
           </div>
         </div>
       )}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: isMobile ? 12 : 20 }}>
-        <div>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-            <h3 style={{ margin:0, fontSize: isMobile ? 14 : 15, fontWeight:700, color:'#1a3a2a' }}>Expense Records</h3>
-            {isAdmin && <button onClick={()=>setShowForm(!showForm)}
-                                style={{ padding: isMobile ? '7px 14px' : '8px 16px', background:'#4caf50', color:'#fff', border:'none',
-                                         borderRadius:10, cursor:'pointer', fontSize: isMobile ? 12 : 13, fontWeight:600,
-                                         display:'flex', alignItems:'center', gap:6 }}>
-              <Icon name="plus" size={14}/> + Add Expense
-            </button>}
-          </div>
 
-          {showForm && isAdmin && (
-            <div style={{ background:'#fff', borderRadius:12, padding:20, marginBottom:16,
-                          boxShadow:'0 1px 8px rgba(0,0,0,0.06)', border:'1px solid #ffccbc' }}>
-              <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr 1fr', gap:12 }}>
-                {[['Date','date','date'],['Description','description','text'],['Amount (KES)','amount','number']].map(([l,f,t])=>(
-                  <div key={f}>
-                    <label style={{ fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4 }}>{l}</label>
-                    <input type={t} value={form[f]} onChange={e=>setForm(p=>({...p,[f]:e.target.value}))}
-                           placeholder={f==='amount'?'0.00':''}
-                           style={{ width:'100%', padding:'8px 11px', borderRadius:7,
-                                    border:'1.5px solid #ddd', fontSize:13, boxSizing:'border-box' }}/>
-                  </div>
-                ))}
+      {/* ── Two-column tables layout ──────────────────────── */}
+      <div style={{ display:'grid',
+                    gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+                    gap: isMobile ? 14 : 20 }}>
+
+        {/* ── Personal Expenses Table ── */}
+        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 8px rgba(0,0,0,0.06)', overflow:'hidden' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                        padding: isMobile ? '12px 14px' : '16px 20px',
+                        borderBottom:'1px solid #f0f0f0' }}>
+            <div>
+              <h3 style={{ margin:0, fontSize: isMobile ? 13 : 15, fontWeight:700, color:'#1a3a2a' }}>
+                👤 Personal Expenses
+              </h3>
+              <div style={{ fontSize:11, color:'#888', marginTop:2 }}>
+                Total: <strong style={{ color:'#c62828' }}>{fmt(totalPersonalExpenses)}</strong>
               </div>
-              <button disabled={saving} onClick={async ()=>{
-                if (!form.description||!form.amount) return;
-                setSaving(true);
-                try {
-                  await onAdd({...form, amount:parseFloat(form.amount)});
-                  setForm({date:today(),description:'',amount:''});
-                  setShowForm(false);
-                } catch(e){ alert(e.message); }
-                finally { setSaving(false); }
-              }} style={{ marginTop:12, padding:'9px 20px', background: saving?'#a5d6a7':'#4caf50',
-                         color:'#fff', border:'none', borderRadius:8, cursor: saving?'not-allowed':'pointer',
-                         fontSize:13, fontWeight:700 }}>
-                {saving?'Saving…':'Save Expense'}
-              </button>
             </div>
-          )}
-
-          <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 8px rgba(0,0,0,0.06)', overflow:'hidden' }}>
-            {isMobile ? (
-              <div style={{ padding:'0 10px' }}>
-                <div style={{ display:'grid', gridTemplateColumns:'80px 1fr 80px 28px', gap:4,
-                              padding:'8px 0', borderBottom:'2px solid #eee' }}>
-                  {['Date','Description','Amount',''].map(h=>(
-                    <div key={h} style={{ fontSize:11, fontWeight:700, color:'#444' }}>{h}</div>
-                  ))}
-                </div>
-                {expenses.length===0
-                  ? <div style={{ padding:'16px 0', color:'#aaa', fontSize:13 }}>No expenses yet.</div>
-                  : expenses.map(e=>(
-                    <div key={e.id} style={{ display:'grid', gridTemplateColumns:'80px 1fr 80px 28px',
-                                             gap:4, padding:'9px 0', borderBottom:'1px solid #f5f5f5', alignItems:'center' }}>
-                      <div style={{ fontSize:11, color:'#666' }}>{e.date.substring(5)}</div>
-                      <div style={{ fontSize:11, color:'#333', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.description}</div>
-                      <div style={{ fontSize:12, fontWeight:700, color:'#c62828' }}>{fmt(e.amount)}</div>
-                      <div>{isAdmin && <button onClick={()=>onDelete(e.id)}
-                                          style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350', padding:0 }}>
-                        <Icon name="trash" size={13}/>
-                      </button>}</div>
-                    </div>
-                  ))
-                }
-                <div style={{ display:'grid', gridTemplateColumns:'80px 1fr 80px 28px',
-                              gap:4, padding:'9px 0', borderTop:'2px solid #eee' }}>
-                  <div style={{ fontSize:12, fontWeight:700, gridColumn:'1/3' }}>TOTAL</div>
-                  <div style={{ fontSize:13, fontWeight:800, color:'#c62828' }}>{fmt(totalExp)}</div>
-                  <div/>
-                </div>
-              </div>
-            ) : (
-              <div style={{ overflowX:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-                  <thead><tr style={{ background:'#f5f5f5' }}>
-                    {['Date','Description','Amount',''].map(h=>
-                      <th key={h} style={{ padding:'10px 14px', textAlign:'left', fontWeight:700, color:'#444', fontSize:12 }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {expenses.map(e=>(
-                      <tr key={e.id} style={{ borderBottom:'1px solid #f5f5f5' }}>
-                        <td style={{ padding:'11px 14px', color:'#666' }}>{e.date}</td>
-                        <td style={{ padding:'11px 14px', color:'#333' }}>{e.description}</td>
-                        <td style={{ padding:'11px 14px', fontWeight:700, color:'#c62828' }}>{fmt(e.amount)}</td>
-                        <td style={{ padding:'11px 14px' }}>
-                          {isAdmin && <button onClick={()=>onDelete(e.id)}
-                                              style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350' }}>
-                            <Icon name="trash" size={14}/>
-                          </button>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot><tr style={{ background:'#f9f9f9', borderTop:'2px solid #eee' }}>
-                    <td colSpan={2} style={{ padding:'11px 14px', fontWeight:700, fontSize:13 }}>TOTAL</td>
-                    <td style={{ padding:'11px 14px', fontWeight:800, color:'#c62828', fontSize:15 }}>{fmt(totalExp)}</td>
-                    <td/>
-                  </tr></tfoot>
-                </table>
-              </div>
+            {isAdmin && (
+              <button onClick={()=>{ setShowPersonalForm(!showPersonalForm); setPersonalForm(emptyForm); }}
+                      style={{ padding: isMobile ? '6px 12px' : '8px 14px', background:'#4caf50', color:'#fff',
+                               border:'none', borderRadius:10, cursor:'pointer',
+                               fontSize: isMobile ? 11 : 13, fontWeight:600,
+                               display:'flex', alignItems:'center', gap:5 }}>
+                <Icon name="plus" size={13}/> Add
+              </button>
             )}
           </div>
+          {showPersonalForm && isAdmin && (
+            <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
+              <AddForm form={personalForm} setForm={setPersonalForm}
+                       saving={savingPersonal} onSubmit={handleAddPersonal}
+                       onCancel={()=>{ setShowPersonalForm(false); setPersonalForm(emptyForm); }}/>
+            </div>
+          )}
+          <ExpenseTable rows={expenses} expenseType="personal"/>
         </div>
 
-        <div style={{ background:'#fff', borderRadius:12, padding: isMobile ? '12px 14px' : 20, boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
-          <h3 style={{ margin:'0 0 10px', fontSize: isMobile ? 13 : 14, fontWeight:700, color:'#1a3a2a' }}>Monthly Breakdown</h3>
-          {Object.entries(monthlyExp).sort((a,b)=>b[0].localeCompare(a[0])).map(([m,amt])=>(
-            <div key={m} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-                                   padding: isMobile ? '7px 0' : '10px 0', borderBottom:'1px solid #f5f5f5' }}>
-              <div style={{ fontSize: isMobile ? 11 : 13, color:'#555' }}>
-                {new Date(m+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}
+        {/* ── Restock Expenses Table ── */}
+        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 8px rgba(0,0,0,0.06)', overflow:'hidden' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                        padding: isMobile ? '12px 14px' : '16px 20px',
+                        borderBottom:'1px solid #f0f0f0' }}>
+            <div>
+              <h3 style={{ margin:0, fontSize: isMobile ? 13 : 15, fontWeight:700, color:'#1a3a2a' }}>
+                📦 Restock Expenses
+              </h3>
+              <div style={{ fontSize:11, color:'#888', marginTop:2 }}>
+                Total: <strong style={{ color:'#c62828' }}>{fmt(totalRestockExpenses)}</strong>
               </div>
-              <div style={{ fontWeight:700, color:'#c62828' }}>{fmt(amt)}</div>
             </div>
-          ))}
-          {Object.keys(monthlyExp).length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No expenses yet.</div>}
+            {isAdmin && (
+              <button onClick={()=>{ setShowRestockForm(!showRestockForm); setRestockForm(emptyForm); }}
+                      style={{ padding: isMobile ? '6px 12px' : '8px 14px', background:'#00838f', color:'#fff',
+                               border:'none', borderRadius:10, cursor:'pointer',
+                               fontSize: isMobile ? 11 : 13, fontWeight:600,
+                               display:'flex', alignItems:'center', gap:5 }}>
+                <Icon name="plus" size={13}/> Add
+              </button>
+            )}
+          </div>
+          {showRestockForm && isAdmin && (
+            <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
+              <AddForm form={restockForm} setForm={setRestockForm}
+                       saving={savingRestock} onSubmit={handleAddRestock}
+                       onCancel={()=>{ setShowRestockForm(false); setRestockForm(emptyForm); }}/>
+            </div>
+          )}
+          <ExpenseTable rows={restockExpenses} expenseType="restock"/>
         </div>
+      </div>
+
+      {/* ── Monthly Breakdown (personal only, below tables) ── */}
+      <div style={{ background:'#fff', borderRadius:12, padding: isMobile ? '12px 14px' : 20,
+                    boxShadow:'0 1px 8px rgba(0,0,0,0.06)', marginTop: isMobile ? 14 : 20 }}>
+        <h3 style={{ margin:'0 0 10px', fontSize: isMobile ? 13 : 14, fontWeight:700, color:'#1a3a2a' }}>Monthly Breakdown (Personal)</h3>
+        {Object.entries(monthlyPersonal).sort((a,b)=>b[0].localeCompare(a[0])).map(([m,amt])=>(
+          <div key={m} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                                 padding: isMobile ? '7px 0' : '10px 0', borderBottom:'1px solid #f5f5f5' }}>
+            <div style={{ fontSize: isMobile ? 11 : 13, color:'#555' }}>
+              {new Date(m+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}
+            </div>
+            <div style={{ fontWeight:700, color:'#c62828' }}>{fmt(amt)}</div>
+          </div>
+        ))}
+        {Object.keys(monthlyPersonal).length===0 && <div style={{ color:'#aaa', fontSize:13 }}>No personal expenses yet.</div>}
       </div>
     </div>
   );
@@ -2145,12 +2264,14 @@ function ReportsPage({ businessInfo }) {
             📈 Financial Summary — {new Date(month+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}
           </h3>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:14, marginBottom:18 }}>
-            {[['Revenue',        fmt(fs.total_revenue),      '#1565c0'],
-              ['Gross Profit',   fmt(fs.total_profit),       '#2e7d32'],
-              ['Expenses',       fmt(fs.total_expenses),     '#c62828'],
-              ['Net Profit',     fmt(fs.net_profit),         fs.net_profit>=0?'#558b2f':'#c62828'],
-              ['Items Sold',     fs.total_items_sold,        '#6a1b9a'],
-              ['Transactions',   fs.total_transactions,      '#e65100'],
+            {[['Revenue',                fmt(fs.total_revenue),            '#1565c0'],
+              ['Revenue After Restock',  fmt(fs.revenue_after_restock),    '#00838f'],
+              ['Gross Profit',           fmt(fs.total_profit),             '#2e7d32'],
+              ['Personal Expenses',      fmt(fs.total_personal_expenses),  '#e65100'],
+              ['Restock Expenses',       fmt(fs.total_restock_expenses),   '#c62828'],
+              ['Net Profit',             fmt(fs.net_profit),               fs.net_profit>=0?'#558b2f':'#c62828'],
+              ['Items Sold',             fs.total_items_sold,              '#6a1b9a'],
+              ['Transactions',           fs.total_transactions,            '#e65100'],
             ].map(([l,v,c])=>(
               <div key={l} style={{ background:'#f9f9f9', borderRadius:10, padding:'14px 16px', borderLeft:`3px solid ${c}` }}>
                 <div style={{ fontSize:11, color:'#888', fontWeight:600 }}>{l}</div>
@@ -2159,8 +2280,9 @@ function ReportsPage({ businessInfo }) {
             ))}
           </div>
           <div style={{ background:'#f9f9f9', borderRadius:10, padding:14, fontFamily:'monospace', fontSize:12, lineHeight:2 }}>
-            <div>Revenue: {fmt(fs.total_revenue)}</div>
-            <div>Gross Profit: {fmt(fs.total_profit)} &nbsp;|&nbsp; Net Profit: {fmt(fs.net_profit)}</div>
+            <div>Revenue: {fmt(fs.total_revenue)} &nbsp;|&nbsp; Revenue After Restock: {fmt(fs.revenue_after_restock)}</div>
+            <div>Gross Profit: {fmt(fs.total_profit)} &nbsp;|&nbsp; Net Profit (gross − personal expenses): {fmt(fs.net_profit)}</div>
+            <div>Personal Expenses: {fmt(fs.total_personal_expenses)} &nbsp;|&nbsp; Restock Expenses: {fmt(fs.total_restock_expenses)}</div>
             {fs.total_revenue>0 && <div>Profit Margin: {fs.profit_margin_pct}%</div>}
           </div>
         </div>
