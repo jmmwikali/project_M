@@ -1347,6 +1347,7 @@ function InventoryPage({ inventory, categories, isAdmin, onUpdate, onAdd, onDele
 // SALES PAGE
 // ============================================================
 function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, currentUser, setModal, showNotif }) {
+  const [searchTerm, setSearchTerm] = React.useState('');
   const isMobile = useIsMobile();
   const [cartItems,   setCartItems]   = useState([]);
   const [searchItem,  setSearchItem]  = useState('');
@@ -1379,6 +1380,14 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
   const cartTotal  = cartItems.reduce((a,c)=>a+c.price*c.quantity, 0);
   const cartProfit = cartItems.reduce((a,c)=>a+(c.price-c.cost)*c.quantity, 0);
 
+  const filteredSales = sales.filter(s => {
+    const matchesDate = dateFilter ? s.date === dateFilter : true;
+    const matchesSearch = s.items.some(item => 
+      item.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    return matchesDate && matchesSearch;
+  });
+
   const submitSale = async () => {
     if (!cartItems.length) return;
     setCompleting(true);
@@ -1394,8 +1403,6 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
       setCompleting(false);
     }
   };
-
-  const filteredSales = sales.filter(s => !dateFilter || s.date===dateFilter);
 
   // ── Receipt view ──────────────────────────────────────────────
   // Mobile: styled card matching reference image (dark header, scalloped edge, clean body)
@@ -1667,6 +1674,43 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
             </div>
           );
         })()}
+
+        {/* 🔍 SEARCH BAR */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 8, 
+          background: '#fff', 
+          padding: '10px 14px', 
+          borderRadius: 12, 
+          border: '1px solid #e0e0e0', 
+          marginBottom: 16,
+          boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+        }}>
+          <span style={{ fontSize: 16 }}>🔍</span> 
+          <input 
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search sales by item name..."
+            style={{ 
+              border: 'none', 
+              outline: 'none', 
+              fontSize: 14, 
+              width: '100%',
+              background: 'transparent'
+            }}
+          />
+          {searchTerm && (
+            <button 
+              onClick={() => setSearchTerm('')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#888' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
         <div style={{ background:'#fff', borderRadius:12, padding:20,
                       boxShadow:'0 1px 8px rgba(0,0,0,0.06)',
                       maxHeight: isMobile ? 500 : 'none', overflowY: isMobile ? 'auto' : 'visible' }}>
@@ -1898,8 +1942,8 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
                       {fmt(c.price*c.quantity)}
                     </div>
                     <button onClick={()=>setCartItems(prev=>prev.filter(x=>x.item_id!==c.item_id))}
-                            style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350', padding:2 }}>
-                      <Icon name="x" size={14}/>
+                      style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350', fontSize: 14, padding:2 }}>
+                      ✕
                     </button>
                   </div>
                 ))}
