@@ -1493,7 +1493,11 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
       `}</style>
 
       {/* ── Outer wrapper ── */}
-      <div className="receipt-printable" style={{ maxWidth: isMobile ? '100%' : 480, margin:'0 auto' }}>
+      <div className="receipt-printable" style={{ 
+        maxWidth: isMobile ? '100%' : 480, 
+        margin: '0 auto',
+        padding: isMobile ? '10px' : '0' // Adds a safety gap on mobile
+      }}>
 
         {/* ════════════════════════════════
             MOBILE LAYOUT
@@ -1557,7 +1561,7 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
                         </div>
                       </td>
                       <td style={{ textAlign:'right', verticalAlign:'top', fontWeight:700,
-                                   fontSize:13, paddingTop:10, color:'#111', wordBreak:'break-word' }}>
+                                   fontSize:13, paddingTop:10, color:'#111', wordBreak:'break-word', whiteSpace: 'nowrap' }}>
                         {fmt(it.total)}
                       </td>
                     </tr>
