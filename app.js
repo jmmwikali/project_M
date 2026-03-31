@@ -544,6 +544,7 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
   const [saving,       setSaving]       = useState(false);
   const [editingDays,  setEditingDays]  = useState(false);
   const [draftDays,    setDraftDays]    = useState(String(alertDays));
+  const [clearingIds,  setClearingIds]  = useState({}); // id -> true when in "Cleared" countdown
   const [form, setForm] = useState({
     person_name:'', total_cost:'', date_added:today(), notes:''
   });
@@ -737,46 +738,31 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
                       <td style={{ padding: isMobile?'8px':'10px 12px' }}>
                         <div style={{ display:'flex', gap:4 }}>
                           {!d.cleared && (
-                            <button onClick={()=>setModal(
-                              <div>
-                                <h3 style={{ margin:'0 0 12px', color:'#1a3a2a' }}>Mark as Cleared?</h3>
-                                <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
-                                  Mark debt from <strong>{d.person_name}</strong> ({fmt(d.total_cost)}) as cleared?
-                                </p>
-                                <div style={{ display:'flex', gap:10 }}>
-                                  <button onClick={()=>setModal(null)}
-                                          style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
-                                                   background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
-                                  <button onClick={async()=>{ await onClear(d.id); setModal(null); }}
-                                          style={{ flex:1, padding:'9px', background:'#2e7d32', color:'#fff',
-                                                   border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>✓ Clear</button>
-                                </div>
-                              </div>
-                            )} style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
-                                        border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                              Clear
-                            </button>
-                          )}
-                          {currentUser?.role==='admin' && (
-                            <button onClick={()=>setModal(
-                              <div>
-                                <h3 style={{ margin:'0 0 12px', color:'#c62828' }}>Delete Debt?</h3>
-                                <p style={{ color:'#666', fontSize:13, margin:'0 0 18px' }}>
-                                  Permanently delete debt from <strong>{d.person_name}</strong>?
-                                </p>
-                                <div style={{ display:'flex', gap:10 }}>
-                                  <button onClick={()=>setModal(null)}
-                                          style={{ flex:1, padding:'9px', border:'1.5px solid #ddd', borderRadius:8,
-                                                   background:'#fff', cursor:'pointer', fontSize:13, fontWeight:600 }}>Cancel</button>
-                                  <button onClick={async()=>{ await onDelete(d.id); setModal(null); }}
-                                          style={{ flex:1, padding:'9px', background:'#c62828', color:'#fff',
-                                                   border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700 }}>🗑 Delete</button>
-                                </div>
-                              </div>
-                            )} style={{ padding:'4px 8px', background:'#ffebee', color:'#c62828',
-                                        border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
-                              🗑
-                            </button>
+                            clearingIds[d.id]
+                              ? (
+                                <button disabled
+                                        style={{ padding:'4px 10px', background:'#c8e6c9', color:'#2e7d32',
+                                                 border:'none', borderRadius:6, fontSize:11, fontWeight:700,
+                                                 cursor:'default', opacity:0.85 }}>
+                                  ✓ Cleared
+                                </button>
+                              )
+                              : (
+                                <button onClick={() => {
+                                  // Mark UI immediately as clearing
+                                  setClearingIds(prev => ({ ...prev, [d.id]: true }));
+                                  onClear(d.id).catch(() => {});
+                                  // After 5 seconds, delete from DB and remove from UI
+                                  setTimeout(async () => {
+                                    try { await onDelete(d.id); } catch(e) {}
+                                    setClearingIds(prev => { const n = {...prev}; delete n[d.id]; return n; });
+                                  }, 5000);
+                                }}
+                                style={{ padding:'4px 10px', background:'#e8f5e9', color:'#2e7d32',
+                                          border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>
+                                  Clear
+                                </button>
+                              )
                           )}
                         </div>
                       </td>
@@ -2223,6 +2209,9 @@ function ReportsPage({ businessInfo }) {
   const [report,  setReport]  = useState(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
+  const [cbfAmount,    setCbfAmount]    = useState('');
+  const [cbfSaving,    setCbfSaving]    = useState(false);
+  const [cbfSaved,     setCbfSaved]     = useState(false);
 
   const fetchReport = async () => {
     setLoading(true); setError('');
@@ -2236,7 +2225,16 @@ function ReportsPage({ businessInfo }) {
     }
   };
 
-  useEffect(() => { fetchReport(); }, [month]);
+  const fetchCbf = async () => {
+    try {
+      const data = await api(`/api/cash-brought-forward?month=${month}`);
+      setCbfAmount(data.amount !== null && data.amount !== undefined ? String(data.amount) : '');
+    } catch(e) {
+      setCbfAmount('');
+    }
+  };
+
+  useEffect(() => { fetchReport(); fetchCbf(); }, [month]);
 
   const fs = report?.financial_summary;
   const im = report?.inventory_movement;
@@ -2375,6 +2373,66 @@ function ReportsPage({ businessInfo }) {
               </div>}
         </div>
       )}
+
+      {/* ── Cash Brought Forward Card ── */}
+      <div style={{ background:'#fff', borderRadius:12, padding:22, marginTop:18,
+                    boxShadow:'0 1px 8px rgba(0,0,0,0.06)', borderLeft:'3px solid #1565c0' }}>
+        <h3 style={{ margin:'0 0 6px', fontSize:15, fontWeight:800, color:'#1a3a2a' }}>
+          💵 Cash Brought Forward
+        </h3>
+        <p style={{ margin:'0 0 16px', fontSize:12, color:'#888' }}>
+          Record the opening cash balance for {new Date(month+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}.
+          This is a record only and does not affect any calculated values.
+        </p>
+        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+          <div style={{ flex:1, minWidth:180 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4 }}>
+              Amount (KES)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={cbfAmount}
+              onChange={e => { setCbfAmount(e.target.value); setCbfSaved(false); }}
+              placeholder="0.00"
+              style={{ width:'100%', padding:'9px 12px', borderRadius:8,
+                       border:'1.5px solid #ddd', fontSize:14, boxSizing:'border-box' }}
+            />
+          </div>
+          <button
+            disabled={cbfSaving}
+            onClick={async () => {
+              if (cbfAmount === '' || cbfAmount === null) return;
+              const parsed = parseFloat(cbfAmount);
+              if (isNaN(parsed) || parsed < 0) return;
+              setCbfSaving(true);
+              try {
+                await api('/api/cash-brought-forward', {
+                  method: 'POST',
+                  body: { month, amount: parsed },
+                });
+                setCbfSaved(true);
+              } catch(e) {
+                alert('Failed to save: ' + e.message);
+              } finally {
+                setCbfSaving(false);
+              }
+            }}
+            style={{ marginTop:18, padding:'9px 22px',
+                     background: cbfSaving ? '#a5d6a7' : '#1a3a2a',
+                     color:'#fff', border:'none', borderRadius:8,
+                     cursor: cbfSaving ? 'not-allowed' : 'pointer',
+                     fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
+            {cbfSaving ? 'Saving…' : cbfSaved ? '✓ Saved' : 'Save'}
+          </button>
+        </div>
+        {cbfSaved && (
+          <div style={{ marginTop:10, fontSize:12, color:'#2e7d32', fontWeight:600 }}>
+            ✓ Cash Brought Forward saved for this month.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
