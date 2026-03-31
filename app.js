@@ -2255,6 +2255,19 @@ function ReportsPage({ businessInfo }) {
 
   return (
     <div>
+      <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:22 }}>
+        <div>
+          <label style={{ fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4 }}>Report Period</label>
+          <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
+                 style={{ padding:'8px 12px', borderRadius:8, border:'1.5px solid #ddd', fontSize:14 }}/>
+        </div>
+        <button onClick={()=>window.print()}
+                style={{ marginTop:18, padding:'9px 18px', background:'#1a3a2a', color:'#fff', border:'none',
+                         borderRadius:10, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
+      </div>
+
+      {loading && <div style={{ display:'flex', alignItems:'center', gap:10, color:'#888', padding:20 }}><Spinner/> Loading report…</div>}
+      {error   && <div style={{ background:'#ffebee', color:'#c62828', padding:'12px 16px', borderRadius:8, fontSize:13 }}>{error}</div>}
 
       {/* ── Cash Brought Forward Card ── */}
           <div style={{ 
@@ -2340,21 +2353,7 @@ function ReportsPage({ businessInfo }) {
                 </div>
             </div>
         )}
-    </div>
-
-      <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:22 }}>
-        <div>
-          <label style={{ fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4 }}>Report Period</label>
-          <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
-                 style={{ padding:'8px 12px', borderRadius:8, border:'1.5px solid #ddd', fontSize:14 }}/>
-        </div>
-        <button onClick={()=>window.print()}
-                style={{ marginTop:18, padding:'9px 18px', background:'#1a3a2a', color:'#fff', border:'none',
-                         borderRadius:10, cursor:'pointer', fontSize:13, fontWeight:600 }}>🖨 Print</button>
-      </div>
-
-      {loading && <div style={{ display:'flex', alignItems:'center', gap:10, color:'#888', padding:20 }}><Spinner/> Loading report…</div>}
-      {error   && <div style={{ background:'#ffebee', color:'#c62828', padding:'12px 16px', borderRadius:8, fontSize:13 }}>{error}</div>}
+    </div> <br />
 
       {fs && (
         <div style={{ background:'#fff', borderRadius:12, padding:22, marginBottom:18, boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
