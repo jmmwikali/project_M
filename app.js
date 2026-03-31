@@ -2381,8 +2381,7 @@ function ReportsPage({ businessInfo }) {
           💵 Cash Brought Forward
         </h3>
         <p style={{ margin:'0 0 16px', fontSize:12, color:'#888' }}>
-          Record the opening cash balance for {new Date(month+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}.
-          This is a record only and does not affect any calculated values.
+          Record the closing cash balance for {new Date(month+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}.
         </p>
         <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
           <div style={{ flex:1, minWidth:180 }}>
