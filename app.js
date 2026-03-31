@@ -2209,9 +2209,10 @@ function ReportsPage({ businessInfo }) {
   const [report,  setReport]  = useState(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
-  const [cbfAmount,    setCbfAmount]    = useState('');
+  const [cbf, setCbf] = useState('');
   const [cbfSaving,    setCbfSaving]    = useState(false);
   const [cbfSaved,     setCbfSaved]     = useState(false);
+  const [isEditing, setIsEditing] = React.useState(false);
 
   const fetchReport = async () => {
     setLoading(true); setError('');
@@ -2226,15 +2227,27 @@ function ReportsPage({ businessInfo }) {
   };
 
   const fetchCbf = async () => {
-    try {
-      const data = await api(`/api/cash-brought-forward?month=${month}`);
-      setCbfAmount(data.amount !== null && data.amount !== undefined ? String(data.amount) : '');
-    } catch(e) {
-      setCbfAmount('');
+  try {
+    const data = await api(`/api/cash-brought-forward?month=${month}`);
+    if (data.amount !== null && data.amount !== undefined) {
+      setCbf(String(data.amount));
+      setCbfSaved(true); // Mark as saved because data exists in the DB
+    } else {
+      setCbf('');
+      setCbfSaved(false); // No data, show the "Add" button
     }
-  };
+  } catch(e) {
+    setCbf('');
+    setCbfSaved(false);
+  }
+};
 
-  useEffect(() => { fetchReport(); fetchCbf(); }, [month]);
+  useEffect(() => { 
+    setIsEditing(false); // Hide input if user was typing in previous month
+    setCbfSaved(false);   // Reset saved status while loading new month
+    fetchReport(); 
+    fetchCbf(); 
+  }, [month]);
 
   const fs = report?.financial_summary;
   const im = report?.inventory_movement;
@@ -2242,6 +2255,93 @@ function ReportsPage({ businessInfo }) {
 
   return (
     <div>
+
+      {/* ── Cash Brought Forward Card ── */}
+          <div style={{ 
+        background: '#fff', padding: '18px 22px', borderRadius: 12, 
+        boxShadow: '0 1px 8px rgba(0,0,0,0.05)', border: cbfSaved ? '1.5px solid #4caf50' : '1px solid #e0e0e0' 
+    }}>
+        <h3 style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 800, color: '#1a3a2a' }}>
+            💰 Cash Brought Forward
+        </h3>
+        
+        {!isEditing && !cbfSaved ? (
+            /* Initial state: Show button to add amount */
+            <button 
+                onClick={() => setIsEditing(true)}
+                style={{ 
+                    padding: '8px 16px', background: '#e8f5e9', color: '#2e7d32', 
+                    border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 
+                }}
+            >
+                + Add Starting Cash
+            </button>
+        ) : isEditing && !cbfSaved ? (
+            /* Editing state: Show input and save button */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <input 
+                    type="number" 
+                    value={cbf} 
+                    onChange={e => setCbf(e.target.value)} 
+                    placeholder="Enter amount (KES)"
+                    style={{ 
+                        padding: '10px', borderRadius: 8, border: '1.5px solid #ddd', 
+                        fontSize: 14, outline: 'none' 
+                    }}
+                />
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button 
+                        disabled={cbfSaving}
+                        onClick={async () => {
+                            const parsed = parseFloat(cbf) || 0;
+                            setCbfSaving(true);
+                            try {
+                                await api('/api/cash-brought-forward', {
+                                    method: 'POST',
+                                    body: { month, amount: parsed },
+                                });
+                                setCbfSaved(true);
+                                setIsEditing(false); // Exit edit mode
+                            } catch(e) {
+                                alert('Failed to save: ' + e.message);
+                            } finally {
+                                setCbfSaving(false);
+                            }
+                        }}
+                        style={{ 
+                            flex: 1, padding: '9px', background: '#1a3a2a', color: '#fff', 
+                            border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700 
+                        }}
+                    >
+                        {cbfSaving ? 'Saving...' : 'Save Amount'}
+                    </button>
+                    <button 
+                        onClick={() => setIsEditing(false)}
+                        style={{ 
+                            padding: '9px 15px', background: '#f5f5f5', color: '#666', 
+                            border: 'none', borderRadius: 8, cursor: 'pointer' 
+                        }}
+                    >
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        ) : (
+            /* Saved state: Only display the amount, no edits allowed */
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                    <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Amount for {month}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: '#2e7d32', marginTop: 4 }}>
+                        {fmt(parseFloat(cbf) || 0)}
+                    </div>
+                </div>
+                <div style={{ color: '#4caf50' }}>
+                    <Icon name="check" size={20} />
+                </div>
+            </div>
+        )}
+    </div>
+
       <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:22 }}>
         <div>
           <label style={{ fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4 }}>Report Period</label>
@@ -2374,67 +2474,10 @@ function ReportsPage({ businessInfo }) {
         </div>
       )}
 
-      {/* ── Cash Brought Forward Card ── */}
-      <div style={{ background:'#fff', borderRadius:12, padding:22, marginTop:18,
-                    boxShadow:'0 1px 8px rgba(0,0,0,0.06)', borderLeft:'3px solid #1565c0' }}>
-        <h3 style={{ margin:'0 0 6px', fontSize:15, fontWeight:800, color:'#1a3a2a' }}>
-          💵 Cash Brought Forward
-        </h3>
-        <p style={{ margin:'0 0 16px', fontSize:12, color:'#888' }}>
-          Record the closing cash balance for {new Date(month+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}.
-        </p>
-        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-          <div style={{ flex:1, minWidth:180 }}>
-            <label style={{ fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4 }}>
-              Amount (KES)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={cbfAmount}
-              onChange={e => { setCbfAmount(e.target.value); setCbfSaved(false); }}
-              placeholder="0.00"
-              style={{ width:'100%', padding:'9px 12px', borderRadius:8,
-                       border:'1.5px solid #ddd', fontSize:14, boxSizing:'border-box' }}
-            />
-          </div>
-          <button
-            disabled={cbfSaving}
-            onClick={async () => {
-              if (cbfAmount === '' || cbfAmount === null) return;
-              const parsed = parseFloat(cbfAmount);
-              if (isNaN(parsed) || parsed < 0) return;
-              setCbfSaving(true);
-              try {
-                await api('/api/cash-brought-forward', {
-                  method: 'POST',
-                  body: { month, amount: parsed },
-                });
-                setCbfSaved(true);
-              } catch(e) {
-                alert('Failed to save: ' + e.message);
-              } finally {
-                setCbfSaving(false);
-              }
-            }}
-            style={{ marginTop:18, padding:'9px 22px',
-                     background: cbfSaving ? '#a5d6a7' : '#1a3a2a',
-                     color:'#fff', border:'none', borderRadius:8,
-                     cursor: cbfSaving ? 'not-allowed' : 'pointer',
-                     fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
-            {cbfSaving ? 'Saving…' : cbfSaved ? '✓ Saved' : 'Save'}
-          </button>
+      
         </div>
-        {cbfSaved && (
-          <div style={{ marginTop:10, fontSize:12, color:'#2e7d32', fontWeight:600 }}>
-            ✓ Cash Brought Forward saved for this month.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+      );
+    }
 
 // ============================================================
 // ============================================================
