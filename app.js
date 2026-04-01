@@ -165,6 +165,9 @@ function AgrovetApp() {
   const [sales,       setSales]       = useState([]);
   const [expenses,    setExpenses]    = useState([]);
   const [restockExpenses, setRestockExpenses] = useState([]);
+  // All-time datasets used exclusively by Financial Overview (not reset monthly)
+  const [allTimeSales,    setAllTimeSales]    = useState([]);
+  const [allTimeExpenses, setAllTimeExpenses] = useState([]);
   const [users,       setUsers]       = useState([]);
   const [debts,       setDebts]       = useState([]);
   const [settings,    setSettings]    = useState({ debt_alert_days: '3' });
@@ -192,19 +195,29 @@ function AgrovetApp() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [inv, sal, exp, usr, cats] = await Promise.all([
+      // Current-month string e.g. "2025-05"
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+      const [inv, sal, exp, allSal, allExp, usr, cats] = await Promise.all([
         api('/api/items'),
-        api('/api/sales'),
-        api('/api/expenses'),
+        api(`/api/sales?month=${currentMonth}`),      // month-scoped for dashboard cards
+        api(`/api/expenses?month=${currentMonth}`),   // month-scoped for dashboard cards
+        api('/api/sales'),                            // all-time for Financial Overview
+        api('/api/expenses'),                         // all-time for Financial Overview
         api('/api/users').catch(() => ({ users: [] })),
         api('/api/categories'),
       ]);
       setInventory(inv.items || []);
       setSales(sal.sales || []);
-      // Split expenses by type
-      const allExp = exp.expenses || [];
-      setExpenses(allExp.filter(e => e.expense_type === 'personal' || !e.expense_type));
-      setRestockExpenses(allExp.filter(e => e.expense_type === 'restock'));
+      // Split month-scoped expenses by type
+      const monthExp = exp.expenses || [];
+      setExpenses(monthExp.filter(e => e.expense_type === 'personal' || !e.expense_type));
+      setRestockExpenses(monthExp.filter(e => e.expense_type === 'restock'));
+      // All-time data for Financial Overview (not reset monthly)
+      const allExpData = allExp.expenses || [];
+      setAllTimeSales(allSal.sales || []);
+      setAllTimeExpenses(allExpData);
       setUsers(usr.users || []);
       setCategories((cats.categories || []).map(c => c.name));
       const [dbt, sett] = await Promise.all([api('/api/debts'), api('/api/settings')]);
@@ -222,7 +235,7 @@ function AgrovetApp() {
   const handleLogout = async () => {
     await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setCurrentUser(null);
-    setInventory([]); setSales([]); setExpenses([]); setRestockExpenses([]); setUsers([]);
+    setInventory([]); setSales([]); setExpenses([]); setRestockExpenses([]); setAllTimeSales([]); setAllTimeExpenses([]); setUsers([]);
   };
 
   // ── Inventory actions ─────────────────────────────────────
@@ -281,12 +294,14 @@ function AgrovetApp() {
   const deleteSalesByDate = async (date) => {
     const data = await api(`/api/sales/by-date/${date}`, { method: 'DELETE' });
     setSales(prev => prev.filter(s => s.date !== date));
+    setAllTimeSales(prev => prev.filter(s => s.date !== date));
     showNotif(data.message, 'success');
   };
 
   const deleteSale = async (saleId) => {
     await api(`/api/sales/${saleId}`, { method: 'DELETE' });
     setSales(prev => prev.filter(s => s.id !== saleId));
+    setAllTimeSales(prev => prev.filter(s => s.id !== saleId));
     const inv = await api('/api/items');
     setInventory(inv.items || []);
     showNotif('Sale deleted and stock restored.');
@@ -295,6 +310,7 @@ function AgrovetApp() {
   const addSale = async (saleData) => {
     const data = await api('/api/sales', { method:'POST', body: saleData });
     setSales(prev => [data.sale, ...prev]);
+    setAllTimeSales(prev => [data.sale, ...prev]);
     // Refresh inventory quantities after sale
     const inv = await api('/api/items');
     setInventory(inv.items || []);
@@ -310,6 +326,7 @@ function AgrovetApp() {
     } else {
       setExpenses(prev => [data.expense, ...prev]);
     }
+    setAllTimeExpenses(prev => [data.expense, ...prev]);
     showNotif('Expense added.');
   };
 
@@ -320,10 +337,11 @@ function AgrovetApp() {
     } else {
       setExpenses(prev => prev.filter(e => e.id !== id));
     }
+    setAllTimeExpenses(prev => prev.filter(e => e.id !== id));
     showNotif('Expense deleted.');
   };
 
-  // ── Derived values ────────────────────────────────────────
+  // ── Derived values (month-scoped — used by dashboard cards) ─
   const lowStockItems        = inventory.filter(i => i.quantity <= i.min_stock_level);
   const outOfStock           = inventory.filter(i => i.quantity === 0);
   const totalRevenue         = sales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
@@ -333,6 +351,12 @@ function AgrovetApp() {
   const totalExpenses        = totalPersonalExpenses + totalRestockExpenses;
   const netProfit            = totalProfit - totalPersonalExpenses;   // restock does NOT reduce net profit
   const revenueAfterRestock  = totalRevenue - totalRestockExpenses;
+  // ── All-time derived values (Financial Overview only) ─────
+  const allTimeRevenue       = allTimeSales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
+  const allTimeProfit        = allTimeSales.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
+  const allTimePersonalExp   = allTimeExpenses.filter(e => e.expense_type === 'personal' || !e.expense_type).reduce((a,e) => a + parseFloat(e.amount||0), 0);
+  const allTimeRestockExp    = allTimeExpenses.filter(e => e.expense_type === 'restock').reduce((a,e) => a + parseFloat(e.amount||0), 0);
+  const allTimeNetProfit     = allTimeProfit - allTimePersonalExp;
   const isAdmin              = currentUser?.role === 'admin';
   const isMobile             = useIsMobile();
 
@@ -369,7 +393,8 @@ function AgrovetApp() {
         totalRestockExpenses={totalRestockExpenses} businessInfo={businessInfo} setActiveTab={setActiveTab}
         debts={debts} onAddDebt={addDebt} onClearDebt={clearDebt} onDeleteDebt={deleteDebt}
         settings={settings} onSaveSettings={saveSettings}
-        currentUser={currentUser} setModal={setModal} showNotif={showNotif}/>;
+        currentUser={currentUser} setModal={setModal} showNotif={showNotif}
+        allTimeRevenue={allTimeRevenue} allTimeProfit={allTimeProfit} allTimeNetProfit={allTimeNetProfit}/>;
       case 'inventory': return <InventoryPage inventory={inventory} categories={categories} isAdmin={isAdmin}
         onUpdate={updateInventoryItem} onAdd={addInventoryItem} onDelete={deleteInventoryItem}
         onRestock={restock} onAdjust={adjustStock} showNotif={showNotif} setModal={setModal}/>;
@@ -781,7 +806,8 @@ function DebtsCard({ debts, inventory, onAdd, onClear, onDelete, currentUser, se
 // DASHBOARD
 // ============================================================
 function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debts, onAddDebt, onClearDebt, onDeleteDebt, settings, onSaveSettings, currentUser, setModal, showNotif,
-                     totalRevenue, totalProfit, netProfit, revenueAfterRestock, totalRestockExpenses, businessInfo, setActiveTab }) {
+                     totalRevenue, totalProfit, netProfit, revenueAfterRestock, totalRestockExpenses, businessInfo, setActiveTab,
+                     allTimeRevenue, allTimeProfit, allTimeNetProfit }) {
   const isMobile = useIsMobile();                    
   const todaySales   = sales.filter(s => s.date === today());
   const todayRevenue = todaySales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
@@ -812,10 +838,21 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
     </div>
   );
 
+  const now = new Date();
+  const monthLabel = now.toLocaleString('default', { month:'long', year:'numeric' });
+
   return (
     <div style={{ maxWidth:'100%', overflowX:'hidden' }}>
+      {/* ── Month scope badge ── */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+        <span style={{ background:'#e8f5e9', color:'#2e7d32', fontWeight:700, fontSize:12,
+                        borderRadius:20, padding:'4px 12px', border:'1px solid #c8e6c9' }}>
+          📅 {monthLabel}
+        </span>
+        <span style={{ fontSize:11, color:'#aaa' }}>Dashboard resets automatically each month</span>
+      </div>
       <div style={{ display:'grid', gridTemplateColumns: window.innerWidth < 768 ? '1fr' : 'repeat(auto-fit,minmax(200px,1fr))', gap: window.innerWidth < 768 ? 10 : 16, marginBottom: window.innerWidth < 768 ? 14 : 24 }}>
-        <StatCard label="Total Revenue" value={fmt(totalRevenue)} icon="sales" color="#1565c0" sub="All recorded sales"/>
+        <StatCard label="Total Revenue" value={fmt(totalRevenue)} icon="sales" color="#1565c0" sub="This month's sales"/>
         <StatCard label="Revenue After Restock" value={fmt(revenueAfterRestock)} icon="restock" color="#00838f"
                   sub={`Restock costs: ${fmt(totalRestockExpenses)}`}/>
         <StatCard label="Gross Profit" value={fmt(totalProfit)} icon="reports" color="#2e7d32"
@@ -833,7 +870,7 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
       {isMobile && (
         <div style={{ background:'#fff', borderRadius:12, padding:'14px 16px', marginBottom:12,
                       boxShadow:'0 1px 8px rgba(0,0,0,0.06)', borderLeft:'4px solid #1565c0' }}>
-          <div style={{ fontSize:13, fontWeight:700, color:'#1a3a2a', marginBottom:6 }}>Formula</div>
+          <div style={{ fontSize:13, fontWeight:700, color:'#1a3a2a', marginBottom:6 }}>This Month's Formula</div>
           <div style={{ fontFamily:'monospace', fontSize:12, color:'#333', lineHeight:1.9 }}>
             net = gross − expenses<br/>
             {fmt(totalProfit)} − {fmt(totalExp)} =<br/>
@@ -844,7 +881,7 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
       {isMobile ? (
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <div style={{ background:'#fff', borderRadius:12, padding:'18px 16px', boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
-            <h3 style={{ margin:'0 0 14px', fontSize:15, fontWeight:800, color:'#1a3a2a' }}>📊 Financial Overview</h3>
+            <h3 style={{ margin:'0 0 14px', fontSize:15, fontWeight:800, color:'#1a3a2a' }}>📊 Financial Overview <span style={{ fontSize:10, fontWeight:500, color:'#888', marginLeft:4 }}>All-time</span></h3>
             <div style={{ background:'#f9f9f9', borderRadius:10, padding:'14px 16px', fontFamily:'monospace',
                           fontSize:12, color:'#333', marginBottom:14, lineHeight:2.1 }}>
               <div style={{ color:'#2e7d32', fontWeight:700, marginBottom:2 }}>Profit Formulas:</div>
@@ -853,9 +890,9 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
               <div>net_profit = total_profit − total_expenses</div>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
-              {[['Gross Revenue',fmt(totalRevenue),'#e8f5e9','#1a3a2a'],
-                ['Gross Profit', fmt(totalProfit), '#e3f2fd','#1565c0'],
-                ['Net Profit',   fmt(netProfit),   netProfit>=0?'#f1f8e9':'#ffebee', netProfit>=0?'#558b2f':'#c62828']
+              {[['Gross Revenue',fmt(allTimeRevenue),'#e8f5e9','#1a3a2a'],
+                ['Gross Profit', fmt(allTimeProfit), '#e3f2fd','#1565c0'],
+                ['Net Profit',   fmt(allTimeNetProfit),   allTimeNetProfit>=0?'#f1f8e9':'#ffebee', allTimeNetProfit>=0?'#558b2f':'#c62828']
               ].map(([l,v,bg,col]) => (
                 <div key={l} style={{ background:bg, borderRadius:8, padding:'10px 8px' }}>
                   <div style={{ fontSize:9, color:'#666', marginBottom:4, lineHeight:1.3 }}>{l}</div>
@@ -884,7 +921,7 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
       ) : (
         <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:20 }}>
           <div style={{ background:'#fff', borderRadius:12, padding:22, boxShadow:'0 1px 8px rgba(0,0,0,0.06)' }}>
-            <h3 style={{ margin:'0 0 16px', fontSize:14, fontWeight:700, color:'#1a3a2a' }}>📊 Financial Overview</h3>
+            <h3 style={{ margin:'0 0 16px', fontSize:14, fontWeight:700, color:'#1a3a2a' }}>📊 Financial Overview <span style={{ fontSize:10, fontWeight:500, color:'#888', marginLeft:4 }}>All-time</span></h3>
             <div style={{ background:'#f9f9f9', borderRadius:10, padding:16, fontFamily:'monospace',
                           fontSize:13, color:'#333', marginBottom:16, lineHeight:2 }}>
               <div style={{ color:'#2e7d32', fontWeight:600 }}>Profit Formulas:</div>
@@ -893,9 +930,9 @@ function Dashboard({ inventory, sales, expenses, lowStockItems, outOfStock, debt
               <div>net_profit = total_profit − total_expenses</div>
             </div>
             <div style={{ display:'flex', gap:12 }}>
-              {[['Gross Revenue',fmt(totalRevenue),'#e8f5e9','#1a3a2a'],
-                ['Gross Profit', fmt(totalProfit), '#e3f2fd','#1565c0'],
-                ['Net Profit',   fmt(netProfit),   netProfit>=0?'#f1f8e9':'#ffebee', netProfit>=0?'#558b2f':'#c62828']
+              {[['Gross Revenue',fmt(allTimeRevenue),'#e8f5e9','#1a3a2a'],
+                ['Gross Profit', fmt(allTimeProfit), '#e3f2fd','#1565c0'],
+                ['Net Profit',   fmt(allTimeNetProfit),   allTimeNetProfit>=0?'#f1f8e9':'#ffebee', allTimeNetProfit>=0?'#558b2f':'#c62828']
               ].map(([l,v,bg,col]) => (
                 <div key={l} style={{ flex:1, background:bg, borderRadius:8, padding:'12px 16px' }}>
                   <div style={{ fontSize:11, color:'#666' }}>{l}</div>
