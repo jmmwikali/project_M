@@ -2388,16 +2388,84 @@ function ReportsPage({ businessInfo }) {
                 </div>
             </div>
         ) : (
-            /* Saved state: Only display the amount, no edits allowed */
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                    <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Amount for {month}</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: '#2e7d32', marginTop: 4 }}>
-                        {fmt(parseFloat(cbf) || 0)}
+            /* Saved state: Display amount with +/- adjustment buttons */
+            <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                    <div>
+                        <div style={{ fontSize: 11, color: '#888', fontWeight: 600 }}>Amount for {month}</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: '#2e7d32', marginTop: 4 }}>
+                            {fmt(parseFloat(cbf) || 0)}
+                        </div>
+                    </div>
+                    <div style={{ color: '#4caf50' }}>
+                        <Icon name="check" size={20} />
                     </div>
                 </div>
-                <div style={{ color: '#4caf50' }}>
-                    <Icon name="check" size={20} />
+                <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+                    <div style={{ fontSize: 11, color: '#888', fontWeight: 600, marginBottom: 8 }}>Adjust Amount</div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input
+                            type="number"
+                            id="cbf-adjust-input"
+                            placeholder="Enter amount"
+                            min="0"
+                            style={{
+                                flex: 1, padding: '8px 10px', borderRadius: 8,
+                                border: '1.5px solid #ddd', fontSize: 13, outline: 'none'
+                            }}
+                        />
+                        <button
+                            disabled={cbfSaving}
+                            onClick={async () => {
+                                const input = document.getElementById('cbf-adjust-input');
+                                const adj = parseFloat(input.value) || 0;
+                                if (adj <= 0) return;
+                                const newAmt = Math.max(0, (parseFloat(cbf) || 0) + adj);
+                                setCbfSaving(true);
+                                try {
+                                    await api('/api/cash-brought-forward', {
+                                        method: 'POST',
+                                        body: { month, amount: newAmt },
+                                    });
+                                    setCbf(String(newAmt));
+                                    input.value = '';
+                                } catch(e) { alert('Failed to save: ' + e.message); }
+                                finally { setCbfSaving(false); }
+                            }}
+                            style={{
+                                padding: '8px 14px', background: '#e8f5e9', color: '#2e7d32',
+                                border: 'none', borderRadius: 8, cursor: cbfSaving ? 'not-allowed' : 'pointer',
+                                fontWeight: 800, fontSize: 16, lineHeight: 1
+                            }}
+                            title="Add to amount"
+                        >+</button>
+                        <button
+                            disabled={cbfSaving}
+                            onClick={async () => {
+                                const input = document.getElementById('cbf-adjust-input');
+                                const adj = parseFloat(input.value) || 0;
+                                if (adj <= 0) return;
+                                const newAmt = Math.max(0, (parseFloat(cbf) || 0) - adj);
+                                setCbfSaving(true);
+                                try {
+                                    await api('/api/cash-brought-forward', {
+                                        method: 'POST',
+                                        body: { month, amount: newAmt },
+                                    });
+                                    setCbf(String(newAmt));
+                                    input.value = '';
+                                } catch(e) { alert('Failed to save: ' + e.message); }
+                                finally { setCbfSaving(false); }
+                            }}
+                            style={{
+                                padding: '8px 14px', background: '#ffebee', color: '#c62828',
+                                border: 'none', borderRadius: 8, cursor: cbfSaving ? 'not-allowed' : 'pointer',
+                                fontWeight: 800, fontSize: 16, lineHeight: 1
+                            }}
+                            title="Subtract from amount"
+                        >−</button>
+                    </div>
+                    {cbfSaving && <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>Saving…</div>}
                 </div>
             </div>
         )}
