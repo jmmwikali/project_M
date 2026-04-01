@@ -2012,31 +2012,10 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
 }
 
 // ============================================================
-// EXPENSES PAGE
+// EXPENSE TABLE (top-level to prevent focus loss on re-render)
 // ============================================================
-function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
-                        netProfit, totalProfit, totalRevenue, revenueAfterRestock,
-                        totalPersonalExpenses, totalRestockExpenses, totalExpenses }) {
-  const isMobile = useIsMobile();
-
-  // ── Shared form state: one form per table ──
-  const emptyForm = { date: today(), description: '', amount: '' };
-  const [personalForm,     setPersonalForm]     = useState(emptyForm);
-  const [restockForm,      setRestockForm]       = useState(emptyForm);
-  const [showPersonalForm, setShowPersonalForm]  = useState(false);
-  const [showRestockForm,  setShowRestockForm]   = useState(false);
-  const [savingPersonal,   setSavingPersonal]    = useState(false);
-  const [savingRestock,    setSavingRestock]     = useState(false);
-
-  // Monthly breakdown for personal expenses
-  const monthlyPersonal = {};
-  expenses.forEach(e => {
-    const m = e.date.substring(0,7);
-    monthlyPersonal[m] = (monthlyPersonal[m]||0) + parseFloat(e.amount||0);
-  });
-
-  // ── Reusable expense table ──────────────────────────────
-  const ExpenseTable = ({ rows, expenseType }) => (
+function ExpenseTable({ rows, expenseType, onDelete, isAdmin, isMobile }) {
+  return (
     <>
       {isMobile ? (
         <div style={{ padding:'0 10px' }}>
@@ -2107,9 +2086,13 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
       )}
     </>
   );
+}
 
-  // ── Add-expense form (shared layout, parameterised) ──────
-  const AddForm = ({ form, setForm, saving, onSubmit, onCancel }) => (
+// ============================================================
+// EXPENSE ADD FORM (top-level to prevent focus loss on re-render)
+// ============================================================
+function ExpenseAddForm({ form, setForm, saving, onSubmit, onCancel, isMobile }) {
+  return (
     <div style={{ background:'#fff', borderRadius:12, padding:20, marginBottom:16,
                   boxShadow:'0 1px 8px rgba(0,0,0,0.06)', border:'1px solid #ffccbc' }}>
       <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr 1fr', gap:12 }}>
@@ -2136,6 +2119,31 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
       </div>
     </div>
   );
+}
+
+// ============================================================
+// EXPENSES PAGE
+// ============================================================
+function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
+                        netProfit, totalProfit, totalRevenue, revenueAfterRestock,
+                        totalPersonalExpenses, totalRestockExpenses, totalExpenses }) {
+  const isMobile = useIsMobile();
+
+  // ── Shared form state: one form per table ──
+  const emptyForm = { date: today(), description: '', amount: '' };
+  const [personalForm,     setPersonalForm]     = useState(emptyForm);
+  const [restockForm,      setRestockForm]       = useState(emptyForm);
+  const [showPersonalForm, setShowPersonalForm]  = useState(false);
+  const [showRestockForm,  setShowRestockForm]   = useState(false);
+  const [savingPersonal,   setSavingPersonal]    = useState(false);
+  const [savingRestock,    setSavingRestock]     = useState(false);
+
+  // Monthly breakdown for personal expenses
+  const monthlyPersonal = {};
+  expenses.forEach(e => {
+    const m = e.date.substring(0,7);
+    monthlyPersonal[m] = (monthlyPersonal[m]||0) + parseFloat(e.amount||0);
+  });
 
   const handleAddPersonal = async () => {
     if (!personalForm.description || !personalForm.amount) return;
@@ -2225,12 +2233,12 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
           </div>
           {showPersonalForm && isAdmin && (
             <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
-              <AddForm form={personalForm} setForm={setPersonalForm}
-                       saving={savingPersonal} onSubmit={handleAddPersonal}
+              <ExpenseAddForm form={personalForm} setForm={setPersonalForm}
+                       saving={savingPersonal} onSubmit={handleAddPersonal} isMobile={isMobile}
                        onCancel={()=>{ setShowPersonalForm(false); setPersonalForm(emptyForm); }}/>
             </div>
           )}
-          <ExpenseTable rows={expenses} expenseType="personal"/>
+          <ExpenseTable rows={expenses} expenseType="personal" onDelete={onDelete} isAdmin={isAdmin} isMobile={isMobile}/>
         </div>
 
         {/* ── Restock Expenses Table ── */}
@@ -2258,12 +2266,12 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
           </div>
           {showRestockForm && isAdmin && (
             <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
-              <AddForm form={restockForm} setForm={setRestockForm}
-                       saving={savingRestock} onSubmit={handleAddRestock}
+              <ExpenseAddForm form={restockForm} setForm={setRestockForm}
+                       saving={savingRestock} onSubmit={handleAddRestock} isMobile={isMobile}
                        onCancel={()=>{ setShowRestockForm(false); setRestockForm(emptyForm); }}/>
             </div>
           )}
-          <ExpenseTable rows={restockExpenses} expenseType="restock"/>
+          <ExpenseTable rows={restockExpenses} expenseType="restock" onDelete={onDelete} isAdmin={isAdmin} isMobile={isMobile}/>
         </div>
       </div>
 
