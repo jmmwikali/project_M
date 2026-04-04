@@ -1427,9 +1427,30 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
 
   const submitSale = async () => {
     if (!cartItems.length) return;
+
+    // ── Resolve which date this sale will be saved under ──────────────────
+    // dateFilter is always set (defaults to today() on mount).
+    // We compare it against today() at submit time — not at the moment the
+    // user changed the picker — so a date changed multiple times still works.
+    const todayStr  = today();
+    let   saleDate  = dateFilter || todayStr;   // defensive fallback
+
+    if (saleDate !== todayStr) {
+      // Selected date differs from today → ask for explicit confirmation
+      const confirmed = window.confirm(
+        `Do you want to add sales to the selected date (${saleDate}) instead of today (${todayStr})?`
+      );
+      if (!confirmed) {
+        // User cancelled → silently fall back to today, do NOT change the picker
+        saleDate = todayStr;
+      }
+    }
+    // If saleDate === todayStr (either originally or after cancel) → no prompt shown
+
     setCompleting(true);
     try {
       const data = await onAddSale({
+        sale_date: saleDate,                                             // ← NEW: pass resolved date
         items: cartItems.map(c=>({ item_id:c.item_id, quantity:c.quantity }))
       });
       setViewReceipt(data.receipt);
@@ -1928,6 +1949,14 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
                       boxShadow:'0 1px 8px rgba(0,0,0,0.06)', position: isMobile ? 'static' : 'sticky',
                       top:80, width:'100%', boxSizing:'border-box', overflowX:'hidden' }}>
           <h3 style={{ margin:'0 0 14px', fontSize:15, fontWeight:700, color:'#1a3a2a' }}>🛒 New Sale</h3>
+          {dateFilter && dateFilter !== today() && (
+            <div style={{ marginBottom:12, padding:'6px 10px', background:'#fff8e1',
+                          border:'1px solid #ffe082', borderRadius:8, fontSize:12,
+                          color:'#e65100', display:'flex', alignItems:'center', gap:6 }}>
+              📅 <strong>Date selected: {dateFilter}</strong>
+              <span style={{ color:'#888', fontWeight:400 }}>(you'll be asked to confirm)</span>
+            </div>
+          )}
           <div style={{ position:'relative', marginBottom:14 }}>
             <input value={searchItem} onChange={e=>setSearchItem(e.target.value)}
                    placeholder="Search product…"
