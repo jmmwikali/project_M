@@ -2374,6 +2374,7 @@ function ReportsPage({ businessInfo }) {
   const fs = report?.financial_summary;
   const im = report?.inventory_movement;
   const sl = report?.stock_loss_detection;
+  const cbfAmount = parseFloat(cbf) || 0;
 
   return (
     <div>
@@ -2551,8 +2552,8 @@ function ReportsPage({ businessInfo }) {
             📈 Financial Summary — {new Date(month+'-01').toLocaleDateString('en-KE',{month:'long',year:'numeric'})}
           </h3>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:14, marginBottom:18 }}>
-            {[['Revenue',                fmt(fs.total_revenue),            '#1565c0'],
-              ['Revenue After Restock',  fmt(fs.revenue_after_restock),    '#00838f'],
+            {[['Revenue',                fmt(fs.total_revenue + cbfAmount),            '#1565c0'],
+              ['Revenue After Restock',  fmt(fs.revenue_after_restock + cbfAmount),    '#00838f'],
               ['Gross Profit',           fmt(fs.total_profit),             '#2e7d32'],
               ['Personal Expenses',      fmt(fs.total_personal_expenses),  '#e65100'],
               ['Restock Expenses',       fmt(fs.total_restock_expenses),   '#c62828'],
@@ -2567,7 +2568,8 @@ function ReportsPage({ businessInfo }) {
             ))}
           </div>
           <div style={{ background:'#f9f9f9', borderRadius:10, padding:14, fontFamily:'monospace', fontSize:12, lineHeight:2 }}>
-            <div>Revenue: {fmt(fs.total_revenue)} &nbsp;|&nbsp; Revenue After Restock: {fmt(fs.revenue_after_restock)}</div>
+            <div>Sales Revenue: {fmt(fs.total_revenue)}{cbfAmount > 0 ? ` + Cash B/F: ${fmt(cbfAmount)} = Total Revenue: ${fmt(fs.total_revenue + cbfAmount)}` : ''}</div>
+            <div>Revenue After Restock: {fmt(fs.revenue_after_restock + cbfAmount)}</div>
             <div>Gross Profit: {fmt(fs.total_profit)} &nbsp;|&nbsp; Net Profit (gross − personal expenses): {fmt(fs.net_profit)}</div>
             <div>Personal Expenses: {fmt(fs.total_personal_expenses)} &nbsp;|&nbsp; Restock Expenses: {fmt(fs.total_restock_expenses)}</div>
             {fs.total_revenue>0 && <div>Profit Margin: {fs.profit_margin_pct}%</div>}
