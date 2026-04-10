@@ -364,10 +364,21 @@ function AgrovetApp() {
     await api(`/api/expenses/${id}`, { method:'DELETE' });
     if (expense_type === 'restock') {
       setRestockExpenses(prev => prev.filter(e => e.id !== id));
+      // Refresh inventory — backend may have subtracted quantity
+      const inv = await api('/api/items');
+      setInventory(inv.items || []);
     } else {
       setExpenses(prev => prev.filter(e => e.id !== id));
     }
     setAllTimeExpenses(prev => prev.filter(e => e.id !== id));
+    // Refresh cash balance
+    try {
+      const dash = await api('/api/dashboard');
+      if (dash.financial_stats) {
+        setCashBalance(dash.financial_stats.cash_balance || 0);
+        setCashBroughtFwd(dash.financial_stats.cash_brought_forward || 0);
+      }
+    } catch(_) {}
     showNotif('Expense deleted.');
   };
 
@@ -436,7 +447,8 @@ function AgrovetApp() {
         totalRevenue={totalRevenue}
         cashBalance={cashBalance} cashBroughtFwd={cashBroughtFwd}
         totalPersonalExpenses={totalPersonalExpenses} totalRestockExpenses={totalRestockExpenses}
-        totalExpenses={totalExpenses}/>;
+        totalExpenses={totalExpenses}
+        inventory={inventory}/>;
       case 'reports':  return <ReportsPage businessInfo={businessInfo}/>;
       case 'users':    return <UsersPage users={users} setUsers={setUsers} showNotif={showNotif} currentUser={currentUser} setModal={setModal}/>;
       default: return null;
@@ -2180,14 +2192,29 @@ function SalesPage({ inventory, sales, onAddSale, onDeleteByDate, onDeleteSale, 
 // ============================================================
 // EXPENSE TABLE (top-level to prevent focus loss on re-render)
 // ============================================================
-function ExpenseTable({ rows, expenseType, onDelete, isAdmin, isMobile }) {
+function ExpenseTable({ rows, expenseType, onDelete, isAdmin, isMobile, inventory }) {
+  // Render the "description" column: structured restock shows item+qty, legacy shows description
+  const renderDesc = (e) => {
+    if (e.expense_type === 'restock' && e.item_id) {
+      const itemName = e.item_name || (inventory && inventory.find(i=>i.id===e.item_id)?.name) || `Item #${e.item_id}`;
+      return (
+        <span>
+          <span style={{ fontWeight:600, color:'#1565c0' }}>{itemName}</span>
+          {e.quantity ? <span style={{ color:'#888', fontSize:11 }}> × {e.quantity} units</span> : null}
+        </span>
+      );
+    }
+    // Legacy restock OR personal — show description as-is
+    return e.description || <span style={{ color:'#bbb', fontStyle:'italic' }}>—</span>;
+  };
+
   return (
     <>
       {isMobile ? (
         <div style={{ padding:'0 10px' }}>
           <div style={{ display:'grid', gridTemplateColumns:'76px 1fr 80px 28px',
                         gap:4, padding:'8px 0', borderBottom:'2px solid #eee' }}>
-            {['Date','Description','Amount',''].map(h=>(
+            {['Date','Details','Amount',''].map(h=>(
               <div key={h} style={{ fontSize:11, fontWeight:700, color:'#444' }}>{h}</div>
             ))}
           </div>
@@ -2197,9 +2224,9 @@ function ExpenseTable({ rows, expenseType, onDelete, isAdmin, isMobile }) {
               <div key={e.id} style={{ display:'grid', gridTemplateColumns:'76px 1fr 80px 28px',
                                        gap:4, padding:'9px 0', borderBottom:'1px solid #f5f5f5', alignItems:'center' }}>
                 <div style={{ fontSize:11, color:'#666' }}>{e.date.substring(5)}</div>
-                <div style={{ fontSize:11, color:'#333', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.description}</div>
+                <div style={{ fontSize:11, color:'#333', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{renderDesc(e)}</div>
                 <div style={{ fontSize:12, fontWeight:700, color:'#c62828' }}>{fmt(e.amount)}</div>
-                <div>{isAdmin && <button onClick={()=>onDelete(e.id, expenseType)}
+                <div>{isAdmin && <button onClick={()=>onDelete(e.id, e.expense_type)}
                                          style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350', padding:0 }}>
                   <Icon name="trash" size={13}/>
                 </button>}</div>
@@ -2219,7 +2246,7 @@ function ExpenseTable({ rows, expenseType, onDelete, isAdmin, isMobile }) {
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead><tr style={{ background:'#f5f5f5' }}>
-              {['Date','Description','Amount',''].map(h=>
+              {['Date','Details','Amount',''].map(h=>
                 <th key={h} style={{ padding:'10px 14px', textAlign:'left', fontWeight:700, color:'#444', fontSize:12 }}>{h}</th>)}
             </tr></thead>
             <tbody>
@@ -2228,10 +2255,10 @@ function ExpenseTable({ rows, expenseType, onDelete, isAdmin, isMobile }) {
                 : rows.map(e=>(
                   <tr key={e.id} style={{ borderBottom:'1px solid #f5f5f5' }}>
                     <td style={{ padding:'11px 14px', color:'#666' }}>{e.date}</td>
-                    <td style={{ padding:'11px 14px', color:'#333' }}>{e.description}</td>
+                    <td style={{ padding:'11px 14px', color:'#333' }}>{renderDesc(e)}</td>
                     <td style={{ padding:'11px 14px', fontWeight:700, color:'#c62828' }}>{fmt(e.amount)}</td>
                     <td style={{ padding:'11px 14px' }}>
-                      {isAdmin && <button onClick={()=>onDelete(e.id, expenseType)}
+                      {isAdmin && <button onClick={()=>onDelete(e.id, e.expense_type)}
                                           style={{ background:'none', border:'none', cursor:'pointer', color:'#ef5350' }}>
                         <Icon name="trash" size={14}/>
                       </button>}
@@ -2293,17 +2320,18 @@ function ExpenseAddForm({ form, setForm, saving, onSubmit, onCancel, isMobile })
 function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
                         netProfit, totalProfit, totalRevenue,
                         cashBalance, cashBroughtFwd,
-                        totalPersonalExpenses, totalRestockExpenses, totalExpenses }) {
+                        totalPersonalExpenses, totalRestockExpenses, totalExpenses,
+                        inventory }) {
   const isMobile = useIsMobile();
 
-  // ── Shared form state: one form per table ──
+  // ── Filter state ──────────────────────────────────────────
+  const [filter, setFilter] = useState('all'); // 'all' | 'personal' | 'restock'
+
+  // ── Personal form state ───────────────────────────────────
   const emptyForm = { date: today(), description: '', amount: '' };
   const [personalForm,     setPersonalForm]     = useState(emptyForm);
-  const [restockForm,      setRestockForm]       = useState(emptyForm);
   const [showPersonalForm, setShowPersonalForm]  = useState(false);
-  const [showRestockForm,  setShowRestockForm]   = useState(false);
   const [savingPersonal,   setSavingPersonal]    = useState(false);
-  const [savingRestock,    setSavingRestock]     = useState(false);
 
   // Monthly breakdown for personal expenses
   const monthlyPersonal = {};
@@ -2323,16 +2351,11 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
     finally { setSavingPersonal(false); }
   };
 
-  const handleAddRestock = async () => {
-    if (!restockForm.description || !restockForm.amount) return;
-    setSavingRestock(true);
-    try {
-      await onAdd({ ...restockForm, amount: parseFloat(restockForm.amount), expense_type: 'restock' });
-      setRestockForm(emptyForm);
-      setShowRestockForm(false);
-    } catch(e){ alert(e.message); }
-    finally { setSavingRestock(false); }
-  };
+  // ── Filtered rows for combined view ──────────────────────
+  const allRows = [...expenses, ...restockExpenses].sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+  const filteredRows = filter === 'personal' ? expenses
+                     : filter === 'restock'  ? restockExpenses
+                     : allRows;
 
   return (
     <div>
@@ -2370,79 +2393,77 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
         </div>
       )}
 
-      {/* ── Two-column tables layout ──────────────────────── */}
-      <div style={{ display:'grid',
-                    gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-                    gap: isMobile ? 14 : 20 }}>
-
-        {/* ── Personal Expenses Table ── */}
-        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 8px rgba(0,0,0,0.06)', overflow:'hidden' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-                        padding: isMobile ? '12px 14px' : '16px 20px',
-                        borderBottom:'1px solid #f0f0f0' }}>
-            <div>
-              <h3 style={{ margin:0, fontSize: isMobile ? 13 : 15, fontWeight:700, color:'#1a3a2a' }}>
-                👤 Personal Expenses
-              </h3>
-              <div style={{ fontSize:11, color:'#888', marginTop:2 }}>
-                Total: <strong style={{ color:'#c62828' }}>{fmt(totalPersonalExpenses)}</strong>
-              </div>
-            </div>
-            {isAdmin && (
-              <button onClick={()=>{ setShowPersonalForm(!showPersonalForm); setPersonalForm(emptyForm); }}
-                      style={{ padding: isMobile ? '6px 12px' : '8px 14px', background:'#4caf50', color:'#fff',
-                               border:'none', borderRadius:10, cursor:'pointer',
-                               fontSize: isMobile ? 11 : 13, fontWeight:600,
-                               display:'flex', alignItems:'center', gap:5 }}>
-                <Icon name="plus" size={13}/> Add
-              </button>
-            )}
-          </div>
-          {showPersonalForm && isAdmin && (
-            <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
-              <ExpenseAddForm form={personalForm} setForm={setPersonalForm}
-                       saving={savingPersonal} onSubmit={handleAddPersonal} isMobile={isMobile}
-                       onCancel={()=>{ setShowPersonalForm(false); setPersonalForm(emptyForm); }}/>
-            </div>
-          )}
-          <ExpenseTable rows={expenses} expenseType="personal" onDelete={onDelete} isAdmin={isAdmin} isMobile={isMobile}/>
-        </div>
-
-        {/* ── Restock Expenses Table ── */}
-        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 8px rgba(0,0,0,0.06)', overflow:'hidden' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-                        padding: isMobile ? '12px 14px' : '16px 20px',
-                        borderBottom:'1px solid #f0f0f0' }}>
-            <div>
-              <h3 style={{ margin:0, fontSize: isMobile ? 13 : 15, fontWeight:700, color:'#1a3a2a' }}>
-                📦 Restock Expenses
-              </h3>
-              <div style={{ fontSize:11, color:'#888', marginTop:2 }}>
-                Total: <strong style={{ color:'#c62828' }}>{fmt(totalRestockExpenses)}</strong>
-              </div>
-            </div>
-            {isAdmin && (
-              <button onClick={()=>{ setShowRestockForm(!showRestockForm); setRestockForm(emptyForm); }}
-                      style={{ padding: isMobile ? '6px 12px' : '8px 14px', background:'#00838f', color:'#fff',
-                               border:'none', borderRadius:10, cursor:'pointer',
-                               fontSize: isMobile ? 11 : 13, fontWeight:600,
-                               display:'flex', alignItems:'center', gap:5 }}>
-                <Icon name="plus" size={13}/> Add
-              </button>
-            )}
-          </div>
-          {showRestockForm && isAdmin && (
-            <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
-              <ExpenseAddForm form={restockForm} setForm={setRestockForm}
-                       saving={savingRestock} onSubmit={handleAddRestock} isMobile={isMobile}
-                       onCancel={()=>{ setShowRestockForm(false); setRestockForm(emptyForm); }}/>
-            </div>
-          )}
-          <ExpenseTable rows={restockExpenses} expenseType="restock" onDelete={onDelete} isAdmin={isAdmin} isMobile={isMobile}/>
-        </div>
+      {/* ── Filter Tabs ───────────────────────────────────── */}
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {[['all','All Expenses',totalExpenses],['personal','Personal',totalPersonalExpenses],['restock','Restock / Stock',totalRestockExpenses]].map(([key,label,total])=>(
+          <button key={key} onClick={()=>setFilter(key)}
+                  style={{ padding: isMobile?'7px 12px':'8px 18px',
+                           background: filter===key ? '#1a3a2a' : '#fff',
+                           color: filter===key ? '#fff' : '#555',
+                           border: filter===key ? 'none' : '1.5px solid #ddd',
+                           borderRadius:10, cursor:'pointer',
+                           fontSize: isMobile?11:13, fontWeight:600,
+                           display:'flex', alignItems:'center', gap:6 }}>
+            {label}
+            <span style={{ background: filter===key?'rgba(255,255,255,0.2)':'#f0f0f0',
+                           color: filter===key?'#fff':'#888',
+                           padding:'1px 7px', borderRadius:10, fontSize:11, fontWeight:700 }}>
+              {fmt(total)}
+            </span>
+          </button>
+        ))}
       </div>
 
-      {/* ── Monthly Breakdown (personal only, below tables) ── */}
+      {/* ── Combined / Filtered Table ─────────────────────── */}
+      <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 8px rgba(0,0,0,0.06)', overflow:'hidden', marginBottom: isMobile?14:20 }}>
+
+        {/* Header row with Add button (personal only) */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                      padding: isMobile ? '12px 14px' : '16px 20px',
+                      borderBottom:'1px solid #f0f0f0' }}>
+          <div>
+            <h3 style={{ margin:0, fontSize: isMobile ? 13 : 15, fontWeight:700, color:'#1a3a2a' }}>
+              {filter==='all' ? '📋 All Expenses'
+               : filter==='personal' ? '👤 Personal Expenses'
+               : '📦 Restock / Stock Purchases'}
+            </h3>
+            <div style={{ fontSize:11, color:'#888', marginTop:2 }}>
+              {filter==='restock'
+                ? <span style={{ color:'#00838f' }}>Created automatically from the Inventory page</span>
+                : <span>Total: <strong style={{ color:'#c62828' }}>{fmt(filter==='personal'?totalPersonalExpenses:totalExpenses)}</strong></span>}
+            </div>
+          </div>
+          {/* Only show Add for personal (or all/personal filter) */}
+          {isAdmin && filter !== 'restock' && (
+            <button onClick={()=>{ setShowPersonalForm(!showPersonalForm); setPersonalForm(emptyForm); }}
+                    style={{ padding: isMobile ? '6px 12px' : '8px 14px', background:'#4caf50', color:'#fff',
+                             border:'none', borderRadius:10, cursor:'pointer',
+                             fontSize: isMobile ? 11 : 13, fontWeight:600,
+                             display:'flex', alignItems:'center', gap:5 }}>
+              <Icon name="plus" size={13}/> Add Personal
+            </button>
+          )}
+          {/* Restock note */}
+          {filter === 'restock' && (
+            <span style={{ fontSize:11, color:'#aaa', fontStyle:'italic' }}>
+              Go to Inventory to add stock
+            </span>
+          )}
+        </div>
+
+        {/* Personal add form */}
+        {showPersonalForm && isAdmin && filter !== 'restock' && (
+          <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
+            <ExpenseAddForm form={personalForm} setForm={setPersonalForm}
+                     saving={savingPersonal} onSubmit={handleAddPersonal} isMobile={isMobile}
+                     onCancel={()=>{ setShowPersonalForm(false); setPersonalForm(emptyForm); }}/>
+          </div>
+        )}
+
+        <ExpenseTable rows={filteredRows} onDelete={onDelete} isAdmin={isAdmin} isMobile={isMobile} inventory={inventory}/>
+      </div>
+
+      {/* ── Monthly Breakdown (personal only) ── */}
       <div style={{ background:'#fff', borderRadius:12, padding: isMobile ? '12px 14px' : 20,
                     boxShadow:'0 1px 8px rgba(0,0,0,0.06)', marginTop: isMobile ? 14 : 20 }}>
         <h3 style={{ margin:'0 0 10px', fontSize: isMobile ? 13 : 14, fontWeight:700, color:'#1a3a2a' }}>Monthly Breakdown (Personal)</h3>
