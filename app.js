@@ -253,6 +253,22 @@ function AgrovetApp() {
   const addInventoryItem = async (item) => {
     const data = await api('/api/items', { method:'POST', body: item });
     setInventory(prev => [...prev, data.item]);
+    // Refresh expenses and cash balance — new item records an initial stock purchase expense
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    try {
+      const [exp, dash] = await Promise.all([
+        api(`/api/expenses?month=${currentMonth}`),
+        api('/api/dashboard'),
+      ]);
+      const monthExp = exp.expenses || [];
+      setExpenses(monthExp.filter(e => e.expense_type === 'personal' || !e.expense_type));
+      setRestockExpenses(monthExp.filter(e => e.expense_type === 'restock'));
+      if (dash.financial_stats) {
+        setCashBalance(dash.financial_stats.cash_balance || 0);
+        setCashBroughtFwd(dash.financial_stats.cash_brought_forward || 0);
+      }
+    } catch(_) {}
     showNotif('Item added to inventory.');
   };
 
@@ -2333,6 +2349,23 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
   const [showPersonalForm, setShowPersonalForm]  = useState(false);
   const [savingPersonal,   setSavingPersonal]    = useState(false);
 
+  // ── Restock form state ────────────────────────────────────
+  const emptyRestockForm = { date: today(), description: '', amount: '' };
+  const [restockForm,     setRestockForm]     = useState(emptyRestockForm);
+  const [showRestockForm, setShowRestockForm]  = useState(false);
+  const [savingRestock,   setSavingRestock]    = useState(false);
+
+  const handleAddRestock = async () => {
+    if (!restockForm.description || !restockForm.amount) return;
+    setSavingRestock(true);
+    try {
+      await onAdd({ ...restockForm, amount: parseFloat(restockForm.amount), expense_type: 'restock' });
+      setRestockForm(emptyRestockForm);
+      setShowRestockForm(false);
+    } catch(e){ alert(e.message); }
+    finally { setSavingRestock(false); }
+  };
+
   // Monthly breakdown for personal expenses
   const monthlyPersonal = {};
   expenses.forEach(e => {
@@ -2429,7 +2462,7 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
             </h3>
             <div style={{ fontSize:11, color:'#888', marginTop:2 }}>
               {filter==='restock'
-                ? <span style={{ color:'#00838f' }}>Created automatically from the Inventory page</span>
+                ? <span style={{ color:'#00838f' }}>Auto-recorded from Inventory, or add manually below</span>
                 : <span>Total: <strong style={{ color:'#c62828' }}>{fmt(filter==='personal'?totalPersonalExpenses:totalExpenses)}</strong></span>}
             </div>
           </div>
@@ -2443,11 +2476,15 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
               <Icon name="plus" size={13}/> Add Personal
             </button>
           )}
-          {/* Restock note */}
-          {filter === 'restock' && (
-            <span style={{ fontSize:11, color:'#aaa', fontStyle:'italic' }}>
-              Go to Inventory to add stock
-            </span>
+          {/* Restock: manual Add button */}
+          {isAdmin && filter === 'restock' && (
+            <button onClick={()=>{ setShowRestockForm(!showRestockForm); setRestockForm(emptyRestockForm); }}
+                    style={{ padding: isMobile ? '6px 12px' : '8px 14px', background:'#1565c0', color:'#fff',
+                             border:'none', borderRadius:10, cursor:'pointer',
+                             fontSize: isMobile ? 11 : 13, fontWeight:600,
+                             display:'flex', alignItems:'center', gap:5 }}>
+              <Icon name="plus" size={13}/> Add Stock Purchase
+            </button>
           )}
         </div>
 
@@ -2457,6 +2494,15 @@ function ExpensesPage({ expenses, restockExpenses, onAdd, onDelete, isAdmin,
             <ExpenseAddForm form={personalForm} setForm={setPersonalForm}
                      saving={savingPersonal} onSubmit={handleAddPersonal} isMobile={isMobile}
                      onCancel={()=>{ setShowPersonalForm(false); setPersonalForm(emptyForm); }}/>
+          </div>
+        )}
+
+        {/* Restock manual add form */}
+        {showRestockForm && isAdmin && filter === 'restock' && (
+          <div style={{ padding: isMobile ? '12px 14px' : '16px 20px', borderBottom:'1px solid #f0f0f0' }}>
+            <ExpenseAddForm form={restockForm} setForm={setRestockForm}
+                     saving={savingRestock} onSubmit={handleAddRestock} isMobile={isMobile}
+                     onCancel={()=>{ setShowRestockForm(false); setRestockForm(emptyRestockForm); }}/>
           </div>
         )}
 
