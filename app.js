@@ -163,6 +163,8 @@ function AgrovetApp() {
   const [activeTab,   setActiveTab]   = useState('dashboard');
   const [inventory,   setInventory]   = useState([]);
   const [sales,       setSales]       = useState([]);
+  // Current-month-only sales, used exclusively by the Dashboard cards (resets each month)
+  const [monthSales,  setMonthSales]  = useState([]);
   const [expenses,    setExpenses]    = useState([]);
   const [restockExpenses, setRestockExpenses] = useState([]);
   const [cashBalance,     setCashBalance]     = useState(0);
@@ -203,15 +205,16 @@ function AgrovetApp() {
 
       const [inv, sal, exp, allSal, allExp, usr, cats] = await Promise.all([
         api('/api/items'),
-        api(`/api/sales?month=${currentMonth}`),      // month-scoped for dashboard cards
+        api(`/api/sales?month=${currentMonth}`),      // month-scoped, dashboard cards only
         api(`/api/expenses?month=${currentMonth}`),   // month-scoped for dashboard cards
-        api('/api/sales'),                            // all-time for Financial Overview
+        api('/api/sales'),                            // all-time — used for the Sales page (no monthly reset)
         api('/api/expenses'),                         // all-time for Financial Overview
         api('/api/users').catch(() => ({ users: [] })),
         api('/api/categories'),
       ]);
       setInventory(inv.items || []);
-      setSales(sal.sales || []);
+      setSales(allSal.sales || []);
+      setMonthSales(sal.sales || []);
       // Split month-scoped expenses by type
       const monthExp = exp.expenses || [];
       setExpenses(monthExp.filter(e => e.expense_type === 'personal' || !e.expense_type));
@@ -245,7 +248,7 @@ function AgrovetApp() {
   const handleLogout = async () => {
     await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setCurrentUser(null);
-    setInventory([]); setSales([]); setExpenses([]); setRestockExpenses([]); setAllTimeSales([]); setAllTimeExpenses([]); setUsers([]);
+    setInventory([]); setSales([]); setMonthSales([]); setExpenses([]); setRestockExpenses([]); setAllTimeSales([]); setAllTimeExpenses([]); setUsers([]);
     setCashBalance(0); setCashBroughtFwd(0);
   };
 
@@ -340,6 +343,7 @@ function AgrovetApp() {
   const deleteSalesByDate = async (date) => {
     const data = await api(`/api/sales/by-date/${date}`, { method: 'DELETE' });
     setSales(prev => prev.filter(s => s.date !== date));
+    setMonthSales(prev => prev.filter(s => s.date !== date));
     setAllTimeSales(prev => prev.filter(s => s.date !== date));
     showNotif(data.message, 'success');
   };
@@ -347,6 +351,7 @@ function AgrovetApp() {
   const deleteSale = async (saleId) => {
     await api(`/api/sales/${saleId}`, { method: 'DELETE' });
     setSales(prev => prev.filter(s => s.id !== saleId));
+    setMonthSales(prev => prev.filter(s => s.id !== saleId));
     setAllTimeSales(prev => prev.filter(s => s.id !== saleId));
     const inv = await api('/api/items');
     setInventory(inv.items || []);
@@ -356,6 +361,12 @@ function AgrovetApp() {
   const addSale = async (saleData) => {
     const data = await api('/api/sales', { method:'POST', body: saleData });
     setSales(prev => [data.sale, ...prev]);
+    // Only fold the new sale into the dashboard's month-scoped list if it actually falls in the current month
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    if ((data.sale.date || '').startsWith(currentMonth)) {
+      setMonthSales(prev => [data.sale, ...prev]);
+    }
     setAllTimeSales(prev => [data.sale, ...prev]);
     // Refresh inventory quantities after sale
     const inv = await api('/api/items');
@@ -401,8 +412,8 @@ function AgrovetApp() {
   // ── Derived values (month-scoped — used by dashboard cards) ─
   const lowStockItems        = inventory.filter(i => i.quantity <= i.min_stock_level);
   const outOfStock           = inventory.filter(i => i.quantity === 0);
-  const totalRevenue         = sales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
-  const totalProfit          = sales.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
+  const totalRevenue         = monthSales.reduce((a,s) => a + parseFloat(s.total_amount||0), 0);
+  const totalProfit          = monthSales.reduce((a,s) => a + parseFloat(s.total_profit||0), 0);
   const totalPersonalExpenses = expenses.reduce((a,e) => a + parseFloat(e.amount||0), 0);
   const totalRestockExpenses  = restockExpenses.reduce((a,e) => a + parseFloat(e.amount||0), 0);
   const totalExpenses        = totalPersonalExpenses + totalRestockExpenses;
@@ -443,7 +454,7 @@ function AgrovetApp() {
       </div>
     );
     switch (activeTab) {
-      case 'dashboard': return <Dashboard inventory={inventory} sales={sales} expenses={expenses}
+      case 'dashboard': return <Dashboard inventory={inventory} sales={monthSales} expenses={expenses}
         lowStockItems={lowStockItems} outOfStock={outOfStock} totalRevenue={totalRevenue}
         totalProfit={totalProfit} netProfit={netProfit}
         cashBalance={cashBalance} cashBroughtFwd={cashBroughtFwd}
